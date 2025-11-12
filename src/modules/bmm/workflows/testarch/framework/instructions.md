@@ -2,7 +2,7 @@
 
 # Test Framework Setup
 
-**Workflow ID**: `bmad/bmm/testarch/framework`
+**Workflow ID**: `{bmad_folder}/bmm/testarch/framework`
 **Version**: 4.0 (BMad v6)
 
 ---
@@ -39,7 +39,7 @@ Initialize a production-ready test framework architecture (Playwright or Cypress
    - If found, HALT with message: "Existing test framework detected. Use workflow `upgrade-framework` instead."
 
 3. **Gather Context**
-   - Look for architecture documents (`solution-architecture.md`, `tech-spec*.md`)
+   - Look for architecture documents (`architecture.md`, `tech-spec*.md`)
    - Check for API documentation or endpoint lists
    - Identify authentication requirements
 
@@ -349,7 +349,7 @@ The generated `tests/README.md` should include:
 
 ### Knowledge Base Integration
 
-**Critical:** Consult `{project-root}/bmad/bmm/testarch/tea-index.csv` to identify and load relevant knowledge fragments:
+**Critical:** Consult `{project-root}/{bmad_folder}/bmm/testarch/tea-index.csv` to identify and load relevant knowledge fragments:
 
 - `fixture-architecture.md` - Pure function → fixture → `mergeTests` composition with auto-cleanup (406 lines, 5 examples)
 - `data-factories.md` - Faker-based factories with overrides, nested factories, API seeding, auto-cleanup (498 lines, 5 examples)

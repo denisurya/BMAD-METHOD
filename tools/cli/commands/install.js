@@ -14,6 +14,13 @@ module.exports = {
     try {
       const config = await ui.promptInstall();
 
+      // Handle cancel
+      if (config.actionType === 'cancel') {
+        console.log(chalk.yellow('Installation cancelled.'));
+        process.exit(0);
+        return;
+      }
+
       // Handle agent compilation separately
       if (config.actionType === 'compile') {
         const result = await installer.compileAgents(config);
@@ -21,6 +28,20 @@ module.exports = {
         console.log(chalk.cyan(`Rebuilt ${result.agentCount} agents and ${result.taskCount} tasks`));
         process.exit(0);
         return;
+      }
+
+      // Handle quick update separately
+      if (config.actionType === 'quick-update') {
+        const result = await installer.quickUpdate(config);
+        console.log(chalk.green('\n✨ Quick update complete!'));
+        console.log(chalk.cyan(`Updated ${result.moduleCount} modules with preserved settings`));
+        process.exit(0);
+        return;
+      }
+
+      // Handle reinstall by setting force flag
+      if (config.actionType === 'reinstall') {
+        config._requestedReinstall = true;
       }
 
       // Regular install/update flow
@@ -35,12 +56,9 @@ module.exports = {
       // Check if installation succeeded
       if (result && result.success) {
         console.log(chalk.green('\n✨ Installation complete!'));
-        console.log(
-          chalk.cyan('BMAD Core and Selected Modules have been installed to:'),
-          chalk.bold(result.path || path.resolve(config.directory, 'bmad')),
-        );
+        console.log(chalk.cyan('BMAD Core and Selected Modules have been installed to:'), chalk.bold(result.path));
         console.log(chalk.yellow('\nThank you for helping test the early release version of the new BMad Core and BMad Method!'));
-        console.log(chalk.cyan('Check docs/alpha-release-notes.md in this repository for important information.'));
+        console.log(chalk.cyan('Stable Beta coming soon - please read the full readme.md and linked documentation to get started!'));
         process.exit(0);
       }
     } catch (error) {

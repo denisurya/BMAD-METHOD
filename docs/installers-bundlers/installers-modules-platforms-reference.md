@@ -1,4 +1,4 @@
-# BMAD v6 Installation & Module System Reference
+# BMAD Installation & Module System Reference
 
 ## Table of Contents
 
@@ -13,63 +13,36 @@
 
 ## Overview
 
-BMAD v6 is a modular AI agent framework with intelligent installation, platform-agnostic support, and configuration inheritance.
+BMad Core is a modular AI agent framework with intelligent installation, platform-agnostic support, and configuration inheritance.
 
 ### Key Features
 
-- **Modular Design**: Core + optional modules (BMM, CIS)
+- **Modular Design**: Core + optional modules (BMB, BMM, CIS)
 - **Smart Installation**: Interactive configuration with dependency resolution
-- **Multi-Platform**: Supports 15+ AI coding platforms
-- **Clean Architecture**: Centralized `bmad/` directory, no source pollution
-
-## Quick Start
-
-```bash
-# Interactive installation (recommended)
-bmad install
-
-# Install specific modules
-bmad install -m bmm cis
-
-# Full installation
-bmad install -f
-
-# Check status
-bmad status
-```
-
-### Installation Options
-
-- `-d <path>`: Target directory (default: current)
-- `-m <modules...>`: Specific modules (bmm, cis)
-- `-f`: Full installation
-- `-c`: Core only
-- `-i <ide...>`: Configure specific IDEs
-- `--skip-ide`: Skip IDE configuration
-- `-v`: Verbose output
+- **Clean Architecture**: Centralized `bmad/` directory add to project, no source pollution with multiple folders added
 
 ## Architecture
 
-### Directory Structure
+### Directory Structure upon installation
 
 ```
 project-root/
-├── bmad/                    # Centralized installation
-│   ├── _cfg/               # Configuration
-│   │   ├── agents/         # Agent configs
-│   │   └── agent-party.xml # Agent manifest
-│   ├── core/               # Core module
+├── bmad/                      # Centralized installation
+│   ├── _cfg/                  # Configuration
+│   │   ├── agents/            # Agent configs
+│   │   └── agent-manifest.csv # Agent manifest
+│   ├── core/                  # Core module
 │   │   ├── agents/
 │   │   ├── tasks/
 │   │   └── config.yaml
-│   ├── bmm/                # BMad Method module
+│   ├── bmm/                   # BMad Method module
 │   │   ├── agents/
 │   │   ├── tasks/
-│   │   ├── templates/
+│   │   ├── workflows/
 │   │   └── config.yaml
-│   └── cis/                # Creative Innovation Studio
+│   └── cis/                   # Creative Innovation Studio
 │       └── ...
-└── .claude/                # Platform-specific (example)
+└── .claude/                   # Platform-specific (example)
     └── agents/
 ```
 
@@ -78,11 +51,10 @@ project-root/
 1. **Detection**: Check existing installation
 2. **Selection**: Choose modules interactively or via CLI
 3. **Configuration**: Collect module-specific settings
-4. **Platform Setup**: Configure AI coding platforms
-5. **Installation**: Process and copy files
-6. **Generation**: Create config files with inheritance
-7. **Post-Install**: Run module installers
-8. **Manifest**: Track installed components
+4. **Installation**: Compile Process and copy files
+5. **Generation**: Create config files with inheritance
+6. **Post-Install**: Run module installers
+7. **Manifest**: Track installed components
 
 ### Key Exclusions
 
@@ -121,7 +93,7 @@ Creative Innovation Studio for design workflows
 src/modules/{module}/
 ├── _module-installer/       # Not copied to destination
 │   ├── installer.js        # Post-install logic
-│   └── install-menu-config.yaml
+│   └── install-config.yaml
 ├── agents/
 ├── tasks/
 ├── templates/
@@ -135,7 +107,7 @@ src/modules/{module}/
 
 ### Collection Process
 
-Modules define prompts in `install-menu-config.yaml`:
+Modules define prompts in `install-config.yaml`:
 
 ```yaml
 project_name:
@@ -246,12 +218,12 @@ Platform-specific content without source modification:
    src/modules/mymod/
    ├── _module-installer/
    │   ├── installer.js
-   │   └── install-menu-config.yaml
+   │   └── install-config.yaml
    ├── agents/
    └── tasks/
    ```
 
-2. **Configuration** (`install-menu-config.yaml`)
+2. **Configuration** (`install-config.yaml`)
 
    ```yaml
    code: mymod
@@ -339,6 +311,66 @@ bmad status -v      # Detailed status
 - Agent references (cross-module)
 - Template dependencies
 - Partial module installation (only required files)
+- Workflow vendoring for standalone module operation
+
+## Workflow Vendoring
+
+**Problem**: Modules that reference workflows from other modules create dependencies, forcing users to install multiple modules even when they only need one.
+
+**Solution**: Workflow vendoring allows modules to copy workflows from other modules during installation, making them fully standalone.
+
+### How It Works
+
+Agents can specify both `workflow` (source location) and `workflow-install` (destination location) in their menu items:
+
+```yaml
+menu:
+  - trigger: create-story
+    workflow: '{project-root}/bmad/bmm/workflows/4-implementation/create-story/workflow.yaml'
+    workflow-install: '{project-root}/bmad/bmgd/workflows/4-production/create-story/workflow.yaml'
+    description: 'Create a game feature story'
+```
+
+**During Installation:**
+
+1. **Vendoring Phase**: Before copying module files, the installer:
+   - Scans source agent YAML files for `workflow-install` attributes
+   - Copies entire workflow folders from `workflow` path to `workflow-install` path
+   - Updates vendored `workflow.yaml` files to reference target module's config
+
+2. **Compilation Phase**: When compiling agents:
+   - If `workflow-install` exists, uses its value for the `workflow` attribute
+   - `workflow-install` is build-time metadata only, never appears in final XML
+   - Compiled agent references vendored workflow location
+
+3. **Config Update**: Vendored workflows get their `config_source` updated:
+
+   ```yaml
+   # Source workflow (in bmm):
+   config_source: "{project-root}/bmad/bmm/config.yaml"
+
+   # Vendored workflow (in bmgd):
+   config_source: "{project-root}/bmad/bmgd/config.yaml"
+   ```
+
+**Result**: Modules become completely standalone with their own copies of needed workflows, configured for their specific use case.
+
+### Example Use Case: BMGD Module
+
+The BMad Game Development module vendors implementation workflows from BMM:
+
+- Game Dev Scrum Master agent references BMM workflows
+- During installation, workflows are copied to `bmgd/workflows/4-production/`
+- Vendored workflows use BMGD's config (with game-specific settings)
+- BMGD can be installed without BMM dependency
+
+### Benefits
+
+✅ **Module Independence** - No forced dependencies
+✅ **Clean Namespace** - Workflows live in their module
+✅ **Config Isolation** - Each module uses its own configuration
+✅ **Customization Ready** - Vendored workflows can be modified independently
+✅ **No User Confusion** - Avoid partial module installations
 
 ### File Processing
 
@@ -346,6 +378,7 @@ bmad status -v      # Detailed status
 - Excludes `_module-installer/` directories
 - Replaces path placeholders at runtime
 - Injects activation blocks
+- Vendors cross-module workflows (see Workflow Vendoring below)
 
 ### Web Bundling
 

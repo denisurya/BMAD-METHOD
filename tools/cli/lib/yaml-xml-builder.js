@@ -155,8 +155,27 @@ class YamlXmlBuilder {
     }
 
     // Start building XML
-    let xml = '<!-- Powered by BMAD-CORE™ -->\n\n';
-    xml += `# ${metadata.title || 'Agent'}\n\n`;
+    let xml = '';
+
+    if (buildMetadata.forWebBundle) {
+      // Web bundle: keep existing format
+      xml += '<!-- Powered by BMAD-CORE™ -->\n\n';
+      xml += `# ${metadata.title || 'Agent'}\n\n`;
+    } else {
+      // Installation: use YAML frontmatter + instruction
+      // Extract name from filename: "cli-chief.yaml" or "pm.agent.yaml" -> "cli chief" or "pm"
+      const filename = buildMetadata.sourceFile || 'agent.yaml';
+      let nameFromFile = path.basename(filename, path.extname(filename)); // Remove .yaml/.md extension
+      nameFromFile = nameFromFile.replace(/\.agent$/, ''); // Remove .agent suffix if present
+      nameFromFile = nameFromFile.replaceAll('-', ' '); // Replace dashes with spaces
+
+      xml += '---\n';
+      xml += `name: "${nameFromFile}"\n`;
+      xml += `description: "${metadata.title || 'BMAD Agent'}"\n`;
+      xml += '---\n\n';
+      xml +=
+        "You must fully embody this agent's persona and follow all activation instructions exactly as specified. NEVER break character until given an exit command.\n\n";
+    }
 
     xml += '```xml\n';
 
@@ -292,7 +311,15 @@ class YamlXmlBuilder {
         const attrs = [`cmd="${trigger}"`];
 
         // Add handler attributes
-        if (item.workflow) attrs.push(`workflow="${item.workflow}"`);
+        // If workflow-install exists, use its value for workflow attribute (vendoring)
+        // workflow-install is build-time metadata - tells installer where to copy workflows
+        // The final XML should only have workflow pointing to the install location
+        if (item['workflow-install']) {
+          attrs.push(`workflow="${item['workflow-install']}"`);
+        } else if (item.workflow) {
+          attrs.push(`workflow="${item.workflow}"`);
+        }
+
         if (item['validate-workflow']) attrs.push(`validate-workflow="${item['validate-workflow']}"`);
         if (item.exec) attrs.push(`exec="${item.exec}"`);
         if (item.tmpl) attrs.push(`tmpl="${item.tmpl}"`);

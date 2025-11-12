@@ -16,6 +16,7 @@ const { getProjectRoot, getSourcePath, getModulePath } = require('../../../lib/p
 const { AgentPartyGenerator } = require('../../../lib/agent-party-generator');
 const { CLIUtils } = require('../../../lib/cli-utils');
 const { ManifestGenerator } = require('./manifest-generator');
+const { IdeConfigManager } = require('./ide-config-manager');
 
 class Installer {
   constructor() {
@@ -28,25 +29,109 @@ class Installer {
     this.xmlHandler = new XmlHandler();
     this.dependencyResolver = new DependencyResolver();
     this.configCollector = new ConfigCollector();
+    this.ideConfigManager = new IdeConfigManager();
     this.installedFiles = []; // Track all installed files
+  }
+
+  /**
+   * Find the bmad installation directory in a project
+   * V6+ installations can use ANY folder name but ALWAYS have _cfg/manifest.yaml
+   * @param {string} projectDir - Project directory
+   * @returns {Promise<string>} Path to bmad directory
+   */
+  async findBmadDir(projectDir) {
+    // Check if project directory exists
+    if (!(await fs.pathExists(projectDir))) {
+      // Project doesn't exist yet, return default
+      return path.join(projectDir, 'bmad');
+    }
+
+    // V6+ strategy: Look for ANY directory with _cfg/manifest.yaml
+    // This is the definitive marker of a V6+ installation
+    try {
+      const entries = await fs.readdir(projectDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const manifestPath = path.join(projectDir, entry.name, '_cfg', 'manifest.yaml');
+          if (await fs.pathExists(manifestPath)) {
+            // Found a V6+ installation
+            return path.join(projectDir, entry.name);
+          }
+        }
+      }
+    } catch {
+      // Ignore errors, fall through to default
+    }
+
+    // No V6+ installation found, return default
+    // This will be used for new installations
+    return path.join(projectDir, 'bmad');
+  }
+
+  /**
+   * Copy a file and replace {bmad_folder} placeholder with actual folder name
+   * @param {string} sourcePath - Source file path
+   * @param {string} targetPath - Target file path
+   * @param {string} bmadFolderName - The bmad folder name to use for replacement
+   */
+  async copyFileWithPlaceholderReplacement(sourcePath, targetPath, bmadFolderName) {
+    // List of text file extensions that should have placeholder replacement
+    const textExtensions = ['.md', '.yaml', '.yml', '.txt', '.json', '.js', '.ts', '.html', '.css', '.sh', '.bat', '.csv'];
+    const ext = path.extname(sourcePath).toLowerCase();
+
+    // Check if this is a text file that might contain placeholders
+    if (textExtensions.includes(ext)) {
+      try {
+        // Read the file content
+        let content = await fs.readFile(sourcePath, 'utf8');
+
+        // Replace {bmad_folder} placeholder with actual folder name
+        if (content.includes('{bmad_folder}')) {
+          content = content.replaceAll('{bmad_folder}', bmadFolderName);
+        }
+
+        // Write to target with replaced content
+        await fs.ensureDir(path.dirname(targetPath));
+        await fs.writeFile(targetPath, content, 'utf8');
+      } catch {
+        // If reading as text fails (might be binary despite extension), fall back to regular copy
+        await fs.copy(sourcePath, targetPath, { overwrite: true });
+      }
+    } else {
+      // Binary file or other file type - just copy directly
+      await fs.copy(sourcePath, targetPath, { overwrite: true });
+    }
   }
 
   /**
    * Collect Tool/IDE configurations after module configuration
    * @param {string} projectDir - Project directory
    * @param {Array} selectedModules - Selected modules from configuration
+   * @param {boolean} isFullReinstall - Whether this is a full reinstall
+   * @param {Array} previousIdes - Previously configured IDEs (for reinstalls)
+   * @param {Array} preSelectedIdes - Pre-selected IDEs from early prompt (optional)
    * @returns {Object} Tool/IDE selection and configurations
    */
-  async collectToolConfigurations(projectDir, selectedModules, isFullReinstall = false, previousIdes = []) {
-    // Prompt for tool selection
-    const { UI } = require('../../../lib/ui');
-    const ui = new UI();
-    const toolConfig = await ui.promptToolSelection(projectDir, selectedModules);
+  async collectToolConfigurations(projectDir, selectedModules, isFullReinstall = false, previousIdes = [], preSelectedIdes = null) {
+    // Use pre-selected IDEs if provided, otherwise prompt
+    let toolConfig;
+    if (preSelectedIdes === null) {
+      // Fallback: prompt for tool selection (backwards compatibility)
+      const { UI } = require('../../../lib/ui');
+      const ui = new UI();
+      toolConfig = await ui.promptToolSelection(projectDir, selectedModules);
+    } else {
+      // IDEs were already selected during initial prompts
+      toolConfig = {
+        ides: preSelectedIdes,
+        skipIde: !preSelectedIdes || preSelectedIdes.length === 0,
+      };
+    }
 
     // Check for already configured IDEs
     const { Detector } = require('./detector');
     const detector = new Detector();
-    const bmadDir = path.join(projectDir, 'bmad');
+    const bmadDir = path.join(projectDir, this.bmadFolderName || 'bmad');
 
     // During full reinstall, use the saved previous IDEs since bmad dir was deleted
     // Otherwise detect from existing installation
@@ -59,8 +144,18 @@ class Installer {
       previouslyConfiguredIdes = existingInstall.ides || [];
     }
 
+    // Load saved IDE configurations for already-configured IDEs
+    const savedIdeConfigs = await this.ideConfigManager.loadAllIdeConfigs(bmadDir);
+
     // Collect IDE-specific configurations if any were selected
     const ideConfigurations = {};
+
+    // First, add saved configs for already-configured IDEs
+    for (const ide of toolConfig.ides || []) {
+      if (previouslyConfiguredIdes.includes(ide) && savedIdeConfigs[ide]) {
+        ideConfigurations[ide] = savedIdeConfigs[ide];
+      }
+    }
 
     if (!toolConfig.skipIde && toolConfig.ides && toolConfig.ides.length > 0) {
       // Determine which IDEs are newly selected (not previously configured)
@@ -145,12 +240,10 @@ class Installer {
     // Display welcome message
     CLIUtils.displaySection('BMAD™ Installation', 'Version ' + require(path.join(getProjectRoot(), 'package.json')).version);
 
-    // Preflight: Handle legacy BMAD v4 footprints before any prompts/writes
+    // Note: Legacy V4 detection now happens earlier in UI.promptInstall()
+    // before any config collection, so we don't need to check again here
+
     const projectDir = path.resolve(config.directory);
-    const legacyV4 = await this.detector.detectLegacyV4(projectDir);
-    if (legacyV4.hasLegacyV4) {
-      await this.handleLegacyV4Migration(projectDir, legacyV4);
-    }
 
     // If core config was pre-collected (from interactive mode), use it
     if (config.coreConfig) {
@@ -162,8 +255,23 @@ class Installer {
       }
     }
 
-    // Collect configurations for modules (core was already collected in UI.promptInstall if interactive)
-    const moduleConfigs = await this.configCollector.collectAllConfigurations(config.modules || [], path.resolve(config.directory));
+    // Collect configurations for modules (skip if quick update already collected them)
+    let moduleConfigs;
+    if (config._quickUpdate) {
+      // Quick update already collected all configs, use them directly
+      moduleConfigs = this.configCollector.collectedConfig;
+    } else {
+      // Regular install - collect configurations (core was already collected in UI.promptInstall if interactive)
+      moduleConfigs = await this.configCollector.collectAllConfigurations(config.modules || [], path.resolve(config.directory));
+    }
+
+    // Get bmad_folder from config (default to 'bmad' for backwards compatibility)
+    const bmadFolderName = moduleConfigs.core && moduleConfigs.core.bmad_folder ? moduleConfigs.core.bmad_folder : 'bmad';
+    this.bmadFolderName = bmadFolderName; // Store for use in other methods
+
+    // Set bmad folder name on module manager and IDE manager for placeholder replacement
+    this.moduleManager.setBmadFolderName(bmadFolderName);
+    this.ideManager.setBmadFolderName(bmadFolderName);
 
     // Tool selection will be collected after we determine if it's a reinstall/update/new install
 
@@ -172,6 +280,63 @@ class Installer {
     try {
       // Resolve target directory (path.resolve handles platform differences)
       const projectDir = path.resolve(config.directory);
+
+      // Check if bmad_folder has changed from existing installation (only if project dir exists)
+      let existingBmadDir = null;
+      let existingBmadFolderName = null;
+
+      if (await fs.pathExists(projectDir)) {
+        existingBmadDir = await this.findBmadDir(projectDir);
+        existingBmadFolderName = path.basename(existingBmadDir);
+      }
+
+      const targetBmadDir = path.join(projectDir, bmadFolderName);
+
+      // If bmad_folder changed during update/upgrade, back up old folder and do fresh install
+      if (existingBmadDir && (await fs.pathExists(existingBmadDir)) && existingBmadFolderName !== bmadFolderName) {
+        spinner.stop();
+        console.log(chalk.yellow(`\n⚠️  bmad_folder has changed: ${existingBmadFolderName} → ${bmadFolderName}`));
+        console.log(chalk.yellow('This will result in a fresh installation to the new folder.'));
+
+        const inquirer = require('inquirer');
+        const { confirmFreshInstall } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'confirmFreshInstall',
+            message: chalk.cyan('Proceed with fresh install? (Your old folder will be backed up)'),
+            default: true,
+          },
+        ]);
+
+        if (!confirmFreshInstall) {
+          console.log(chalk.yellow('Installation cancelled.'));
+          return { success: false, cancelled: true };
+        }
+
+        spinner.start('Backing up existing installation...');
+
+        // Find a unique backup name
+        let backupDir = `${existingBmadDir}-bak`;
+        let counter = 1;
+        while (await fs.pathExists(backupDir)) {
+          backupDir = `${existingBmadDir}-bak-${counter}`;
+          counter++;
+        }
+
+        // Rename the old folder to backup
+        await fs.move(existingBmadDir, backupDir);
+
+        spinner.succeed(`Backed up ${existingBmadFolderName} → ${path.basename(backupDir)}`);
+        console.log(chalk.cyan('\n📋 Important:'));
+        console.log(chalk.dim(`  - Your old installation has been backed up to: ${path.basename(backupDir)}`));
+        console.log(chalk.dim(`  - If you had custom agents or configurations, copy them from:`));
+        console.log(chalk.dim(`    ${path.basename(backupDir)}/_cfg/`));
+        console.log(chalk.dim(`  - To the new location:`));
+        console.log(chalk.dim(`    ${bmadFolderName}/_cfg/`));
+        console.log('');
+
+        spinner.start('Starting fresh installation...');
+      }
 
       // Create a project directory if it doesn't exist (user already confirmed)
       if (!(await fs.pathExists(projectDir))) {
@@ -193,20 +358,31 @@ class Installer {
         }
       }
 
-      const bmadDir = path.join(projectDir, 'bmad');
+      const bmadDir = path.join(projectDir, bmadFolderName);
 
       // Check existing installation
       spinner.text = 'Checking for existing installation...';
       const existingInstall = await this.detector.detect(bmadDir);
 
-      if (existingInstall.installed && !config.force) {
+      if (existingInstall.installed && !config.force && !config._quickUpdate) {
         spinner.stop();
 
-        console.log(chalk.yellow('\n⚠️  Existing BMAD installation detected'));
-        console.log(chalk.dim(`  Location: ${bmadDir}`));
-        console.log(chalk.dim(`  Version: ${existingInstall.version}`));
+        // Check if user already decided what to do (from early menu in ui.js)
+        let action = null;
+        if (config._requestedReinstall) {
+          action = 'reinstall';
+        } else if (config.actionType === 'update') {
+          action = 'update';
+        } else {
+          // Fallback: Ask the user (backwards compatibility for other code paths)
+          console.log(chalk.yellow('\n⚠️  Existing BMAD installation detected'));
+          console.log(chalk.dim(`  Location: ${bmadDir}`));
+          console.log(chalk.dim(`  Version: ${existingInstall.version}`));
 
-        const { action } = await this.promptUpdateAction();
+          const promptResult = await this.promptUpdateAction();
+          action = promptResult.action;
+        }
+
         if (action === 'cancel') {
           console.log('Installation cancelled.');
           return { success: false, cancelled: true };
@@ -300,18 +476,88 @@ class Installer {
             console.log(chalk.dim('DEBUG: No modified files detected'));
           }
         }
+      } else if (existingInstall.installed && config._quickUpdate) {
+        // Quick update mode - automatically treat as update without prompting
+        spinner.text = 'Preparing quick update...';
+        config._isUpdate = true;
+        config._existingInstall = existingInstall;
+
+        // Detect custom and modified files BEFORE updating
+        const existingFilesManifest = await this.readFilesManifest(bmadDir);
+        const { customFiles, modifiedFiles } = await this.detectCustomFiles(bmadDir, existingFilesManifest);
+
+        config._customFiles = customFiles;
+        config._modifiedFiles = modifiedFiles;
+
+        // Back up custom files
+        if (customFiles.length > 0) {
+          const tempBackupDir = path.join(projectDir, '.bmad-custom-backup-temp');
+          await fs.ensureDir(tempBackupDir);
+
+          spinner.start(`Backing up ${customFiles.length} custom files...`);
+          for (const customFile of customFiles) {
+            const relativePath = path.relative(bmadDir, customFile);
+            const backupPath = path.join(tempBackupDir, relativePath);
+            await fs.ensureDir(path.dirname(backupPath));
+            await fs.copy(customFile, backupPath);
+          }
+          spinner.succeed(`Backed up ${customFiles.length} custom files`);
+          config._tempBackupDir = tempBackupDir;
+        }
+
+        // Back up modified files
+        if (modifiedFiles.length > 0) {
+          const tempModifiedBackupDir = path.join(projectDir, '.bmad-modified-backup-temp');
+          await fs.ensureDir(tempModifiedBackupDir);
+
+          spinner.start(`Backing up ${modifiedFiles.length} modified files...`);
+          for (const modifiedFile of modifiedFiles) {
+            const relativePath = path.relative(bmadDir, modifiedFile.path);
+            const tempBackupPath = path.join(tempModifiedBackupDir, relativePath);
+            await fs.ensureDir(path.dirname(tempBackupPath));
+            await fs.copy(modifiedFile.path, tempBackupPath, { overwrite: true });
+          }
+          spinner.succeed(`Backed up ${modifiedFiles.length} modified files`);
+          config._tempModifiedBackupDir = tempModifiedBackupDir;
+        }
       }
 
       // Now collect tool configurations after we know if it's a reinstall
+      // Skip for quick update since we already have the IDE list
       spinner.stop();
-      const toolSelection = await this.collectToolConfigurations(
-        path.resolve(config.directory),
-        config.modules,
-        config._isFullReinstall || false,
-        config._previouslyConfiguredIdes || [],
-      );
+      let toolSelection;
+      if (config._quickUpdate) {
+        // Quick update already has IDEs configured, use saved configurations
+        const preConfiguredIdes = {};
+        const savedIdeConfigs = config._savedIdeConfigs || {};
 
-      // Merge tool selection into config
+        for (const ide of config.ides || []) {
+          // Use saved config if available, otherwise mark as already configured (legacy)
+          if (savedIdeConfigs[ide]) {
+            preConfiguredIdes[ide] = savedIdeConfigs[ide];
+          } else {
+            preConfiguredIdes[ide] = { _alreadyConfigured: true };
+          }
+        }
+        toolSelection = {
+          ides: config.ides || [],
+          skipIde: !config.ides || config.ides.length === 0,
+          configurations: preConfiguredIdes,
+        };
+      } else {
+        // Pass pre-selected IDEs from early prompt (if available)
+        // This allows IDE selection to happen before file copying, improving UX
+        const preSelectedIdes = config.ides && config.ides.length > 0 ? config.ides : null;
+        toolSelection = await this.collectToolConfigurations(
+          path.resolve(config.directory),
+          config.modules,
+          config._isFullReinstall || false,
+          config._previouslyConfiguredIdes || [],
+          preSelectedIdes,
+        );
+      }
+
+      // Merge tool selection into config (for both quick update and regular flow)
       config.ides = toolSelection.ides;
       config.skipIde = toolSelection.skipIde;
       const ideConfigurations = toolSelection.configurations;
@@ -354,7 +600,13 @@ class Installer {
         // Install partial modules (only dependencies)
         for (const [module, files] of Object.entries(resolution.byModule)) {
           if (!config.modules.includes(module) && module !== 'core') {
-            const totalFiles = files.agents.length + files.tasks.length + files.templates.length + files.data.length + files.other.length;
+            const totalFiles =
+              files.agents.length +
+              files.tasks.length +
+              files.tools.length +
+              files.templates.length +
+              files.data.length +
+              files.other.length;
             if (totalFiles > 0) {
               spinner.start(`Installing ${module} dependencies...`);
               await this.installPartialModule(module, bmadDir, files);
@@ -385,44 +637,87 @@ class Installer {
       // Generate CSV manifests for workflows, agents, tasks AND ALL FILES with hashes BEFORE IDE setup
       spinner.start('Generating workflow and agent manifests...');
       const manifestGen = new ManifestGenerator();
+
+      // Include preserved modules (from quick update) in the manifest
+      const allModulesToList = config._preserveModules ? [...(config.modules || []), ...config._preserveModules] : config.modules || [];
+
       const manifestStats = await manifestGen.generateManifests(bmadDir, config.modules || [], this.installedFiles, {
         ides: config.ides || [],
+        preservedModules: config._preserveModules || [], // Scan these from installed bmad/ dir
       });
 
       spinner.succeed(
-        `Manifests generated: ${manifestStats.workflows} workflows, ${manifestStats.agents} agents, ${manifestStats.tasks} tasks, ${manifestStats.files} files`,
+        `Manifests generated: ${manifestStats.workflows} workflows, ${manifestStats.agents} agents, ${manifestStats.tasks} tasks, ${manifestStats.tools} tools, ${manifestStats.files} files`,
       );
 
       // Configure IDEs and copy documentation
       if (!config.skipIde && config.ides && config.ides.length > 0) {
-        spinner.start('Configuring IDEs...');
+        // Filter out any undefined/null values from the IDE list
+        const validIdes = config.ides.filter((ide) => ide && typeof ide === 'string');
 
-        // Temporarily suppress console output if not verbose
-        const originalLog = console.log;
-        if (!config.verbose) {
-          console.log = () => {};
+        if (validIdes.length === 0) {
+          console.log(chalk.yellow('⚠️  No valid IDEs selected. Skipping IDE configuration.'));
+        } else {
+          // Check if any IDE might need prompting (no pre-collected config)
+          const needsPrompting = validIdes.some((ide) => !ideConfigurations[ide]);
+
+          if (!needsPrompting) {
+            spinner.start('Configuring IDEs...');
+          }
+
+          // Temporarily suppress console output if not verbose
+          const originalLog = console.log;
+          if (!config.verbose) {
+            console.log = () => {};
+          }
+
+          for (const ide of validIdes) {
+            // Only show spinner if we have pre-collected config (no prompts expected)
+            if (ideConfigurations[ide] && !needsPrompting) {
+              spinner.text = `Configuring ${ide}...`;
+            } else if (!ideConfigurations[ide]) {
+              // Stop spinner before prompting
+              if (spinner.isSpinning) {
+                spinner.stop();
+              }
+              console.log(chalk.cyan(`\nConfiguring ${ide}...`));
+            }
+
+            // Pass pre-collected configuration to avoid re-prompting
+            await this.ideManager.setup(ide, projectDir, bmadDir, {
+              selectedModules: config.modules || [],
+              preCollectedConfig: ideConfigurations[ide] || null,
+              verbose: config.verbose,
+            });
+
+            // Save IDE configuration for future updates
+            if (ideConfigurations[ide] && !ideConfigurations[ide]._alreadyConfigured) {
+              await this.ideConfigManager.saveIdeConfig(bmadDir, ide, ideConfigurations[ide]);
+            }
+
+            // Restart spinner if we stopped it
+            if (!ideConfigurations[ide] && !spinner.isSpinning) {
+              spinner.start('Configuring IDEs...');
+            }
+          }
+
+          // Restore console.log
+          console.log = originalLog;
+
+          if (spinner.isSpinning) {
+            spinner.succeed(`Configured ${validIdes.length} IDE${validIdes.length > 1 ? 's' : ''}`);
+          } else {
+            console.log(chalk.green(`✓ Configured ${validIdes.length} IDE${validIdes.length > 1 ? 's' : ''}`));
+          }
         }
 
-        for (const ide of config.ides) {
-          spinner.text = `Configuring ${ide}...`;
-
-          // Pass pre-collected configuration to avoid re-prompting
-          await this.ideManager.setup(ide, projectDir, bmadDir, {
-            selectedModules: config.modules || [],
-            preCollectedConfig: ideConfigurations[ide] || null,
-            verbose: config.verbose,
-          });
+        // Copy IDE-specific documentation (only for valid IDEs)
+        const validIdesForDocs = (config.ides || []).filter((ide) => ide && typeof ide === 'string');
+        if (validIdesForDocs.length > 0) {
+          spinner.start('Copying IDE documentation...');
+          await this.copyIdeDocumentation(validIdesForDocs, bmadDir);
+          spinner.succeed('IDE documentation copied');
         }
-
-        // Restore console.log
-        console.log = originalLog;
-
-        spinner.succeed(`Configured ${config.ides.length} IDE${config.ides.length > 1 ? 's' : ''}`);
-
-        // Copy IDE-specific documentation
-        spinner.start('Copying IDE documentation...');
-        await this.copyIdeDocumentation(config.ides, bmadDir);
-        spinner.succeed('IDE documentation copied');
       }
 
       // Run module-specific installers after IDE setup
@@ -564,7 +859,8 @@ class Installer {
     const spinner = ora('Checking installation...').start();
 
     try {
-      const bmadDir = path.join(path.resolve(config.directory), 'bmad');
+      const projectDir = path.resolve(config.directory);
+      const bmadDir = await this.findBmadDir(projectDir);
       const existingInstall = await this.detector.detect(bmadDir);
 
       if (!existingInstall.installed) {
@@ -624,7 +920,8 @@ class Installer {
    * Get installation status
    */
   async getStatus(directory) {
-    const bmadDir = path.join(path.resolve(directory), 'bmad');
+    const projectDir = path.resolve(directory);
+    const bmadDir = await this.findBmadDir(projectDir);
     return await this.detector.detect(bmadDir);
   }
 
@@ -639,14 +936,15 @@ class Installer {
    * Uninstall BMAD
    */
   async uninstall(directory) {
-    const bmadDir = path.join(path.resolve(directory), 'bmad');
+    const projectDir = path.resolve(directory);
+    const bmadDir = await this.findBmadDir(projectDir);
 
     if (await fs.pathExists(bmadDir)) {
       await fs.remove(bmadDir);
     }
 
     // Clean up IDE configurations
-    await this.ideManager.cleanup(path.resolve(directory));
+    await this.ideManager.cleanup(projectDir);
 
     return { success: true };
   }
@@ -744,8 +1042,9 @@ class Installer {
           }
         }
 
-        // Write the clean config file
-        await fs.writeFile(configPath, header + yamlContent, 'utf8');
+        // Write the clean config file with POSIX-compliant final newline
+        const content = header + yamlContent;
+        await fs.writeFile(configPath, content.endsWith('\n') ? content : content + '\n', 'utf8');
 
         // Track the config file in installedFiles
         this.installedFiles.push(configPath);
@@ -778,6 +1077,9 @@ class Installer {
    * @param {Object} moduleFiles - Module files to install
    */
   async installModuleWithDependencies(moduleName, bmadDir, moduleFiles) {
+    // Get module configuration for conditional installation
+    const moduleConfig = this.configCollector.collectedConfig[moduleName] || {};
+
     // Use existing module manager for full installation with file tracking
     // Note: Module-specific installers are called separately after IDE setup
     await this.moduleManager.install(
@@ -788,6 +1090,7 @@ class Installer {
       },
       {
         skipModuleInstaller: true, // We'll run it later after IDE setup
+        moduleConfig: moduleConfig, // Pass module config for conditional filtering
       },
     );
 
@@ -819,7 +1122,7 @@ class Installer {
         const targetPath = path.join(agentsDir, fileName);
 
         if (await fs.pathExists(sourcePath)) {
-          await fs.copy(sourcePath, targetPath);
+          await this.copyFileWithPlaceholderReplacement(sourcePath, targetPath, this.bmadFolderName || 'bmad');
           this.installedFiles.push(targetPath);
         }
       }
@@ -835,7 +1138,23 @@ class Installer {
         const targetPath = path.join(tasksDir, fileName);
 
         if (await fs.pathExists(sourcePath)) {
-          await fs.copy(sourcePath, targetPath);
+          await this.copyFileWithPlaceholderReplacement(sourcePath, targetPath, this.bmadFolderName || 'bmad');
+          this.installedFiles.push(targetPath);
+        }
+      }
+    }
+
+    if (files.tools && files.tools.length > 0) {
+      const toolsDir = path.join(targetBase, 'tools');
+      await fs.ensureDir(toolsDir);
+
+      for (const toolPath of files.tools) {
+        const fileName = path.basename(toolPath);
+        const sourcePath = path.join(sourceBase, 'tools', fileName);
+        const targetPath = path.join(toolsDir, fileName);
+
+        if (await fs.pathExists(sourcePath)) {
+          await this.copyFileWithPlaceholderReplacement(sourcePath, targetPath, this.bmadFolderName || 'bmad');
           this.installedFiles.push(targetPath);
         }
       }
@@ -851,7 +1170,7 @@ class Installer {
         const targetPath = path.join(templatesDir, fileName);
 
         if (await fs.pathExists(sourcePath)) {
-          await fs.copy(sourcePath, targetPath);
+          await this.copyFileWithPlaceholderReplacement(sourcePath, targetPath, this.bmadFolderName || 'bmad');
           this.installedFiles.push(targetPath);
         }
       }
@@ -866,7 +1185,7 @@ class Installer {
         await fs.ensureDir(path.dirname(targetPath));
 
         if (await fs.pathExists(dataPath)) {
-          await fs.copy(dataPath, targetPath);
+          await this.copyFileWithPlaceholderReplacement(dataPath, targetPath, this.bmadFolderName || 'bmad');
           this.installedFiles.push(targetPath);
         }
       }
@@ -926,9 +1245,8 @@ class Installer {
         }
       }
 
-      // Copy the file
-      await fs.ensureDir(path.dirname(targetFile));
-      await fs.copy(sourceFile, targetFile, { overwrite: true });
+      // Copy the file with placeholder replacement
+      await this.copyFileWithPlaceholderReplacement(sourceFile, targetFile, this.bmadFolderName || 'bmad');
 
       // Track the installed file
       this.installedFiles.push(targetFile);
@@ -999,7 +1317,7 @@ class Installer {
         if (!(await fs.pathExists(customizePath))) {
           const genericTemplatePath = getSourcePath('utility', 'templates', 'agent.customize.template.yaml');
           if (await fs.pathExists(genericTemplatePath)) {
-            await fs.copy(genericTemplatePath, customizePath);
+            await this.copyFileWithPlaceholderReplacement(genericTemplatePath, customizePath, this.bmadFolderName || 'bmad');
             console.log(chalk.dim(`  Created customize: ${moduleName}-${agentName}.customize.yaml`));
           }
         }
@@ -1013,8 +1331,9 @@ class Installer {
         // DO NOT replace {project-root} - LLMs understand this placeholder at runtime
         // const processedContent = xmlContent.replaceAll('{project-root}', projectDir);
 
-        // Write the built .md file to bmad/{module}/agents/
-        await fs.writeFile(mdPath, xmlContent, 'utf8');
+        // Write the built .md file to bmad/{module}/agents/ with POSIX-compliant final newline
+        const content = xmlContent.endsWith('\n') ? xmlContent : xmlContent + '\n';
+        await fs.writeFile(mdPath, content, 'utf8');
         this.installedFiles.push(mdPath);
 
         // Remove the source YAML file - we can regenerate from installer source if needed
@@ -1031,7 +1350,9 @@ class Installer {
         if (content.includes('<agent') && !content.includes('<activation')) {
           // Inject the activation block using XML handler
           content = this.xmlHandler.injectActivationSimple(content);
-          await fs.writeFile(agentPath, content, 'utf8');
+          // Ensure POSIX-compliant final newline
+          const finalContent = content.endsWith('\n') ? content : content + '\n';
+          await fs.writeFile(agentPath, finalContent, 'utf8');
         }
       }
     }
@@ -1112,8 +1433,9 @@ class Installer {
       // DO NOT replace {project-root} - LLMs understand this placeholder at runtime
       // const processedContent = xmlContent.replaceAll('{project-root}', projectDir);
 
-      // Write the built .md file
-      await fs.writeFile(targetMdPath, xmlContent, 'utf8');
+      // Write the built .md file with POSIX-compliant final newline
+      const content = xmlContent.endsWith('\n') ? xmlContent : xmlContent + '\n';
+      await fs.writeFile(targetMdPath, content, 'utf8');
 
       // Display result
       if (customizedFields.length > 0) {
@@ -1205,8 +1527,9 @@ class Installer {
         // DO NOT replace {project-root} - LLMs understand this placeholder at runtime
         // const processedContent = xmlContent.replaceAll('{project-root}', projectDir);
 
-        // Write the rebuilt .md file
-        await fs.writeFile(targetMdPath, xmlContent, 'utf8');
+        // Write the rebuilt .md file with POSIX-compliant final newline
+        const content = xmlContent.endsWith('\n') ? xmlContent : xmlContent + '\n';
+        await fs.writeFile(targetMdPath, content, 'utf8');
 
         // Display result with customizations if any
         if (customizedFields.length > 0) {
@@ -1229,7 +1552,7 @@ class Installer {
 
     try {
       const projectDir = path.resolve(config.directory);
-      const bmadDir = path.join(projectDir, 'bmad');
+      const bmadDir = await this.findBmadDir(projectDir);
 
       // Check if bmad directory exists
       if (!(await fs.pathExists(bmadDir))) {
@@ -1346,6 +1669,116 @@ class Installer {
     } else {
       // Selective update - preserve user modifications
       await this.fileOps.syncDirectory(sourcePath, targetPath);
+    }
+  }
+
+  /**
+   * Quick update method - preserves all settings and only prompts for new config fields
+   * @param {Object} config - Configuration with directory
+   * @returns {Object} Update result
+   */
+  async quickUpdate(config) {
+    const ora = require('ora');
+    const spinner = ora('Starting quick update...').start();
+
+    try {
+      const projectDir = path.resolve(config.directory);
+      const bmadDir = await this.findBmadDir(projectDir);
+
+      // Check if bmad directory exists
+      if (!(await fs.pathExists(bmadDir))) {
+        spinner.fail('No BMAD installation found');
+        throw new Error(`BMAD not installed at ${bmadDir}. Use regular install for first-time setup.`);
+      }
+
+      spinner.text = 'Detecting installed modules and configuration...';
+
+      // Detect existing installation
+      const existingInstall = await this.detector.detect(bmadDir);
+      const installedModules = existingInstall.modules.map((m) => m.id);
+      const configuredIdes = existingInstall.ides || [];
+
+      // Load saved IDE configurations
+      const savedIdeConfigs = await this.ideConfigManager.loadAllIdeConfigs(bmadDir);
+
+      // Get available modules (what we have source for)
+      const availableModules = await this.moduleManager.listAvailable();
+      const availableModuleIds = new Set(availableModules.map((m) => m.id));
+
+      // Only update modules that are BOTH installed AND available (we have source for)
+      const modulesToUpdate = installedModules.filter((id) => availableModuleIds.has(id));
+      const skippedModules = installedModules.filter((id) => !availableModuleIds.has(id));
+
+      spinner.succeed(`Found ${modulesToUpdate.length} module(s) to update and ${configuredIdes.length} configured tool(s)`);
+
+      if (skippedModules.length > 0) {
+        console.log(chalk.yellow(`⚠️  Skipping ${skippedModules.length} module(s) - no source available: ${skippedModules.join(', ')}`));
+      }
+
+      // Load existing configs and collect new fields (if any)
+      console.log(chalk.cyan('\n📋 Checking for new configuration options...'));
+      await this.configCollector.loadExistingConfig(projectDir);
+
+      let promptedForNewFields = false;
+
+      // Check core config for new fields
+      const corePrompted = await this.configCollector.collectModuleConfigQuick('core', projectDir, true);
+      if (corePrompted) {
+        promptedForNewFields = true;
+      }
+
+      // Check each module we're updating for new fields (NOT skipped modules)
+      for (const moduleName of modulesToUpdate) {
+        const modulePrompted = await this.configCollector.collectModuleConfigQuick(moduleName, projectDir, true);
+        if (modulePrompted) {
+          promptedForNewFields = true;
+        }
+      }
+
+      if (!promptedForNewFields) {
+        console.log(chalk.green('✓ All configuration is up to date, no new options to configure'));
+      }
+
+      // Add metadata
+      this.configCollector.collectedConfig._meta = {
+        version: require(path.join(getProjectRoot(), 'package.json')).version,
+        installDate: new Date().toISOString(),
+        lastModified: new Date().toISOString(),
+      };
+
+      // Now run the full installation with the collected configs
+      spinner.start('Updating BMAD installation...');
+
+      // Build the config object for the installer
+      const installConfig = {
+        directory: projectDir,
+        installCore: true,
+        modules: modulesToUpdate, // Only update modules we have source for
+        ides: configuredIdes,
+        skipIde: configuredIdes.length === 0,
+        coreConfig: this.configCollector.collectedConfig.core,
+        actionType: 'install', // Use regular install flow
+        _quickUpdate: true, // Flag to skip certain prompts
+        _preserveModules: skippedModules, // Preserve these in manifest even though we didn't update them
+        _savedIdeConfigs: savedIdeConfigs, // Pass saved IDE configs to installer
+      };
+
+      // Call the standard install method
+      const result = await this.install(installConfig);
+
+      spinner.succeed('Quick update complete!');
+
+      return {
+        success: true,
+        moduleCount: modulesToUpdate.length + 1, // +1 for core
+        hadNewFields: promptedForNewFields,
+        modules: ['core', ...modulesToUpdate],
+        skippedModules: skippedModules,
+        ides: configuredIdes,
+      };
+    } catch (error) {
+      spinner.fail('Quick update failed');
+      throw error;
     }
   }
 
@@ -1713,6 +2146,11 @@ class Installer {
 
       configContent += processedTemplate;
 
+      // Ensure POSIX-compliant final newline
+      if (!configContent.endsWith('\n')) {
+        configContent += '\n';
+      }
+
       await fs.writeFile(configPath, configContent, 'utf8');
       this.installedFiles.push(configPath); // Track agent config files
       createdCount++;
@@ -1730,7 +2168,7 @@ class Installer {
    * @param {Array} agentDetails - Array of agent details
    */
   async generateAgentManifest(bmadDir, agentDetails) {
-    const manifestPath = path.join(bmadDir, '_cfg', 'agent-party.xml');
+    const manifestPath = path.join(bmadDir, '_cfg', 'agent-manifest.csv');
     await AgentPartyGenerator.writeAgentParty(manifestPath, agentDetails, { forWeb: false });
   }
 
@@ -1794,7 +2232,7 @@ class Installer {
       const targetDocPath = path.join(docsDir, `${ide}-instructions.md`);
 
       if (await fs.pathExists(sourceDocPath)) {
-        await fs.copy(sourceDocPath, targetDocPath, { overwrite: true });
+        await this.copyFileWithPlaceholderReplacement(sourceDocPath, targetDocPath, this.bmadFolderName || 'bmad');
       }
     }
   }

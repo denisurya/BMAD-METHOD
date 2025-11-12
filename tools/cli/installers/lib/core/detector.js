@@ -55,14 +55,16 @@ class Detector {
     }
 
     // Check for modules
-    const entries = await fs.readdir(bmadDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory() && entry.name !== 'core' && entry.name !== '_cfg') {
-        const modulePath = path.join(bmadDir, entry.name);
+    // If manifest exists, use it as the source of truth for installed modules
+    // Otherwise fall back to directory scanning (legacy installations)
+    if (manifestData && manifestData.modules && manifestData.modules.length > 0) {
+      // Use manifest module list - these are officially installed modules
+      for (const moduleId of manifestData.modules) {
+        const modulePath = path.join(bmadDir, moduleId);
         const moduleConfigPath = path.join(modulePath, 'config.yaml');
 
         const moduleInfo = {
-          id: entry.name,
+          id: moduleId,
           path: modulePath,
           version: 'unknown',
         };
@@ -72,7 +74,7 @@ class Detector {
             const configContent = await fs.readFile(moduleConfigPath, 'utf8');
             const config = yaml.load(configContent);
             moduleInfo.version = config.version || 'unknown';
-            moduleInfo.name = config.name || entry.name;
+            moduleInfo.name = config.name || moduleId;
             moduleInfo.description = config.description;
           } catch {
             // Ignore config read errors
@@ -81,11 +83,42 @@ class Detector {
 
         result.modules.push(moduleInfo);
       }
+    } else {
+      // Fallback: scan directory for modules (legacy installations without manifest)
+      const entries = await fs.readdir(bmadDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name !== 'core' && entry.name !== '_cfg') {
+          const modulePath = path.join(bmadDir, entry.name);
+          const moduleConfigPath = path.join(modulePath, 'config.yaml');
+
+          // Only treat it as a module if it has a config.yaml
+          if (await fs.pathExists(moduleConfigPath)) {
+            const moduleInfo = {
+              id: entry.name,
+              path: modulePath,
+              version: 'unknown',
+            };
+
+            try {
+              const configContent = await fs.readFile(moduleConfigPath, 'utf8');
+              const config = yaml.load(configContent);
+              moduleInfo.version = config.version || 'unknown';
+              moduleInfo.name = config.name || entry.name;
+              moduleInfo.description = config.description;
+            } catch {
+              // Ignore config read errors
+            }
+
+            result.modules.push(moduleInfo);
+          }
+        }
+      }
     }
 
     // Check for IDE configurations from manifest
     if (result.manifest && result.manifest.ides) {
-      result.ides = result.manifest.ides;
+      // Filter out any undefined/null values
+      result.ides = result.manifest.ides.filter((ide) => ide && typeof ide === 'string');
     }
 
     // Mark as installed if we found core or modules
@@ -166,6 +199,8 @@ class Detector {
 
   /**
    * Detect legacy BMAD v4 footprints (case-sensitive path checks)
+   * V4 used .bmad-method as default folder name
+   * V6+ uses configurable folder names and ALWAYS has _cfg/manifest.yaml with installation.version
    * @param {string} projectDir - Project directory to check
    * @returns {{ hasLegacyV4: boolean, offenders: string[] }}
    */
@@ -190,18 +225,62 @@ class Detector {
       return true;
     };
 
+    // Helper: check if a directory is a V6+ installation
+    const isV6Installation = async (dirPath) => {
+      const manifestPath = path.join(dirPath, '_cfg', 'manifest.yaml');
+      if (!(await fs.pathExists(manifestPath))) {
+        return false;
+      }
+      try {
+        const yaml = require('js-yaml');
+        const manifestContent = await fs.readFile(manifestPath, 'utf8');
+        const manifest = yaml.load(manifestContent);
+        // V6+ manifest has installation.version
+        return manifest && manifest.installation && manifest.installation.version;
+      } catch {
+        return false;
+      }
+    };
+
     const offenders = [];
 
-    // Find all directories starting with .bmad, bmad, or Bmad
+    // Strategy:
+    // 1. First scan for ANY V6+ installation (_cfg/manifest.yaml)
+    // 2. If V6+ found → don't flag anything (user is already on V6+)
+    // 3. If NO V6+ found → flag folders with "bmad" in name as potential V4 legacy
+
+    let hasV6Installation = false;
+    const potentialV4Folders = [];
+
     try {
       const entries = await fs.readdir(projectDir, { withFileTypes: true });
+
       for (const entry of entries) {
         if (entry.isDirectory()) {
           const name = entry.name;
-          // Match .bmad*, bmad* (lowercase), or Bmad* (capital B)
-          // BUT exclude 'bmad' exactly (that's the new v6 installation directory)
-          if ((name.startsWith('.bmad') || name.startsWith('bmad') || name.startsWith('Bmad')) && name !== 'bmad') {
-            offenders.push(path.join(projectDir, entry.name));
+          const fullPath = path.join(projectDir, entry.name);
+
+          // Check if directory is empty (skip empty leftover folders)
+          const dirContents = await fs.readdir(fullPath);
+          if (dirContents.length === 0) {
+            continue; // Skip empty folders
+          }
+
+          // Check if it's a V6+ installation by looking for _cfg/manifest.yaml
+          // This works for ANY folder name (not just bmad-prefixed)
+          const isV6 = await isV6Installation(fullPath);
+
+          if (isV6) {
+            // Found a V6+ installation - user is already on V6+
+            hasV6Installation = true;
+            // Don't break - continue scanning to be thorough
+          } else {
+            // Not V6+, check if folder name contains "bmad" (case insensitive)
+            const nameLower = name.toLowerCase();
+            if (nameLower.includes('bmad')) {
+              // Potential V4 legacy folder
+              potentialV4Folders.push(fullPath);
+            }
           }
         }
       }
@@ -209,19 +288,29 @@ class Detector {
       // Ignore errors reading directory
     }
 
+    // Only flag V4 folders if NO V6+ installation was found
+    if (!hasV6Installation && potentialV4Folders.length > 0) {
+      offenders.push(...potentialV4Folders);
+    }
+
     // Check inside various IDE command folders for legacy bmad folders
-    // List of IDE config folders that might have commands directories
-    const ideConfigFolders = ['.claude', '.crush', '.continue', '.cursor', '.windsurf', '.cline', '.roo-cline'];
+    // V4 used folders like 'bmad-method' or custom names in IDE commands
+    // V6+ uses 'bmad' in IDE commands (hardcoded in IDE handlers)
+    // Legacy V4 IDE command folders won't have a corresponding V6+ installation
+    const ideConfigFolders = ['.opencode', '.claude', '.crush', '.continue', '.cursor', '.windsurf', '.cline', '.roo-cline'];
 
     for (const ideFolder of ideConfigFolders) {
-      const commandsPath = path.join(projectDir, ideFolder, 'commands');
+      const commandsDirName = ideFolder === '.opencode' ? 'command' : 'commands';
+      const commandsPath = path.join(projectDir, ideFolder, commandsDirName);
       if (await fs.pathExists(commandsPath)) {
         try {
           const commandEntries = await fs.readdir(commandsPath, { withFileTypes: true });
           for (const entry of commandEntries) {
             if (entry.isDirectory()) {
               const name = entry.name;
-              // Find bmad-related folders (excluding exact 'bmad' if it exists)
+              // V4 used 'bmad-method' or similar in IDE commands folders
+              // V6+ uses 'bmad' (hardcoded)
+              // So anything that's NOT 'bmad' but starts with bmad/Bmad is likely V4
               if ((name.startsWith('bmad') || name.startsWith('Bmad') || name === 'BMad') && name !== 'bmad') {
                 offenders.push(path.join(commandsPath, entry.name));
               }

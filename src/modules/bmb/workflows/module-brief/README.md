@@ -254,11 +254,11 @@ To customize this workflow:
 
 For issues or questions:
 
-- Review the workflow creation guide at `/bmad/bmb/workflows/create-workflow/workflow-creation-guide.md`
-- Study existing module examples in `/bmad/` for patterns and inspiration
+- Review the workflow creation guide at `/{bmad_folder}/bmb/workflows/create-workflow/workflow-creation-guide.md`
+- Study existing module examples in `/{bmad_folder}/` for patterns and inspiration
 - Validate output using `checklist.md`
 - Consult module structure guide at `create-module/module-structure.md`
 
 ---
 
-_Part of the BMad Method v5 - BMB (Builder) Module_
+_Part of the BMad Method v6 - BMB (Builder) Module_

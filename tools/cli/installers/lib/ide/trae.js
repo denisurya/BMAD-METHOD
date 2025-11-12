@@ -1,6 +1,7 @@
 const path = require('node:path');
 const { BaseIdeSetup } = require('./_base-ide');
 const chalk = require('chalk');
+const { AgentCommandGenerator } = require('./shared/agent-command-generator');
 
 /**
  * Trae IDE setup handler
@@ -27,83 +28,112 @@ class TraeSetup extends BaseIdeSetup {
 
     await this.ensureDir(rulesDir);
 
-    // Get agents and tasks
-    const agents = await this.getAgents(bmadDir);
-    const tasks = await this.getTasks(bmadDir);
+    // Clean up any existing BMAD files before reinstalling
+    await this.cleanup(projectDir);
 
-    // Process agents as rules
-    let ruleCount = 0;
-    for (const agent of agents) {
-      const content = await this.readFile(agent.path);
-      const processedContent = this.createAgentRule(agent, content, bmadDir, projectDir);
+    // Generate agent launchers
+    const agentGen = new AgentCommandGenerator(this.bmadFolderName);
+    const { artifacts: agentArtifacts } = await agentGen.collectAgentArtifacts(bmadDir, options.selectedModules || []);
 
-      const targetPath = path.join(rulesDir, `${agent.module}-${agent.name}.md`);
+    // Get tasks, tools, and workflows (standalone only)
+    const tasks = await this.getTasks(bmadDir, true);
+    const tools = await this.getTools(bmadDir, true);
+    const workflows = await this.getWorkflows(bmadDir, true);
+
+    // Process agents as rules with bmad- prefix
+    let agentCount = 0;
+    for (const artifact of agentArtifacts) {
+      const processedContent = await this.createAgentRule(artifact, bmadDir, projectDir);
+
+      // Use bmad- prefix: bmad-agent-{module}-{name}.md
+      const targetPath = path.join(rulesDir, `bmad-agent-${artifact.module}-${artifact.name}.md`);
       await this.writeFile(targetPath, processedContent);
-      ruleCount++;
+      agentCount++;
     }
 
-    // Process tasks as rules
+    // Process tasks as rules with bmad- prefix
+    let taskCount = 0;
     for (const task of tasks) {
       const content = await this.readFile(task.path);
       const processedContent = this.createTaskRule(task, content);
 
-      const targetPath = path.join(rulesDir, `task-${task.module}-${task.name}.md`);
+      // Use bmad- prefix: bmad-task-{module}-{name}.md
+      const targetPath = path.join(rulesDir, `bmad-task-${task.module}-${task.name}.md`);
       await this.writeFile(targetPath, processedContent);
-      ruleCount++;
+      taskCount++;
     }
 
+    // Process tools as rules with bmad- prefix
+    let toolCount = 0;
+    for (const tool of tools) {
+      const content = await this.readFile(tool.path);
+      const processedContent = this.createToolRule(tool, content);
+
+      // Use bmad- prefix: bmad-tool-{module}-{name}.md
+      const targetPath = path.join(rulesDir, `bmad-tool-${tool.module}-${tool.name}.md`);
+      await this.writeFile(targetPath, processedContent);
+      toolCount++;
+    }
+
+    // Process workflows as rules with bmad- prefix
+    let workflowCount = 0;
+    for (const workflow of workflows) {
+      const content = await this.readFile(workflow.path);
+      const processedContent = this.createWorkflowRule(workflow, content);
+
+      // Use bmad- prefix: bmad-workflow-{module}-{name}.md
+      const targetPath = path.join(rulesDir, `bmad-workflow-${workflow.module}-${workflow.name}.md`);
+      await this.writeFile(targetPath, processedContent);
+      workflowCount++;
+    }
+
+    const totalRules = agentCount + taskCount + toolCount + workflowCount;
+
     console.log(chalk.green(`✓ ${this.name} configured:`));
-    console.log(chalk.dim(`  - ${ruleCount} rules created`));
+    console.log(chalk.dim(`  - ${agentCount} agent rules created`));
+    console.log(chalk.dim(`  - ${taskCount} task rules created`));
+    console.log(chalk.dim(`  - ${toolCount} tool rules created`));
+    console.log(chalk.dim(`  - ${workflowCount} workflow rules created`));
+    console.log(chalk.dim(`  - Total: ${totalRules} rules`));
     console.log(chalk.dim(`  - Rules directory: ${path.relative(projectDir, rulesDir)}`));
     console.log(chalk.dim(`  - Agents can be activated with @{agent-name}`));
 
     return {
       success: true,
-      rules: ruleCount,
+      rules: totalRules,
+      agents: agentCount,
+      tasks: taskCount,
+      tools: toolCount,
+      workflows: workflowCount,
     };
   }
 
   /**
    * Create rule content for an agent
    */
-  createAgentRule(agent, content, bmadDir, projectDir) {
-    // Extract metadata from agent content
-    const titleMatch = content.match(/title="([^"]+)"/);
-    const title = titleMatch ? titleMatch[1] : this.formatTitle(agent.name);
+  async createAgentRule(artifact, bmadDir, projectDir) {
+    // Strip frontmatter from launcher
+    const frontmatterRegex = /^---\s*\n[\s\S]*?\n---\s*\n/;
+    const contentWithoutFrontmatter = artifact.content.replace(frontmatterRegex, '').trim();
 
-    const iconMatch = content.match(/icon="([^"]+)"/);
-    const icon = iconMatch ? iconMatch[1] : '🤖';
-
-    // Extract YAML content if available
-    const yamlMatch = content.match(/```ya?ml\r?\n([\s\S]*?)```/);
-    const yamlContent = yamlMatch ? yamlMatch[1] : content;
+    // Extract metadata from launcher content
+    const titleMatch = artifact.content.match(/description:\s*"([^"]+)"/);
+    const title = titleMatch ? titleMatch[1] : this.formatTitle(artifact.name);
 
     // Calculate relative path for reference
-    const relativePath = path.relative(projectDir, agent.path).replaceAll('\\', '/');
+    const relativePath = path.relative(projectDir, artifact.sourcePath).replaceAll('\\', '/');
 
     let ruleContent = `# ${title} Agent Rule
 
-This rule is triggered when the user types \`@${agent.name}\` and activates the ${title} agent persona.
+This rule is triggered when the user types \`@${artifact.name}\` and activates the ${title} agent persona.
 
 ## Agent Activation
 
-CRITICAL: Read the full YAML, start activation to alter your state of being, follow startup section instructions, stay in this being until told to exit this mode:
-
-\`\`\`yaml
-${yamlContent}
-\`\`\`
+${contentWithoutFrontmatter}
 
 ## File Reference
 
-The complete agent definition is available in [${relativePath}](${relativePath}).
-
-## Usage
-
-When the user types \`@${agent.name}\`, activate this ${title} persona and follow all instructions defined in the YAML configuration above.
-
-## Module
-
-Part of the BMAD ${agent.module.toUpperCase()} module.
+The full agent definition is located at: \`${relativePath}\`
 `;
 
     return ruleContent;
@@ -114,7 +144,7 @@ Part of the BMAD ${agent.module.toUpperCase()} module.
    */
   createTaskRule(task, content) {
     // Extract task name from content
-    const nameMatch = content.match(/<name>([^<]+)<\/name>/);
+    const nameMatch = content.match(/name="([^"]+)"/);
     const taskName = nameMatch ? nameMatch[1] : this.formatTitle(task.name);
 
     let ruleContent = `# ${taskName} Task Rule
@@ -140,6 +170,64 @@ Part of the BMAD ${task.module.toUpperCase()} module.
   }
 
   /**
+   * Create rule content for a tool
+   */
+  createToolRule(tool, content) {
+    // Extract tool name from content
+    const nameMatch = content.match(/name="([^"]+)"/);
+    const toolName = nameMatch ? nameMatch[1] : this.formatTitle(tool.name);
+
+    let ruleContent = `# ${toolName} Tool Rule
+
+This rule defines the ${toolName} tool.
+
+## Tool Definition
+
+When this tool is triggered, execute the following:
+
+${content}
+
+## Usage
+
+Reference this tool with \`@tool-${tool.name}\` to execute it.
+
+## Module
+
+Part of the BMAD ${tool.module.toUpperCase()} module.
+`;
+
+    return ruleContent;
+  }
+
+  /**
+   * Create rule content for a workflow
+   */
+  createWorkflowRule(workflow, content) {
+    let ruleContent = `# ${workflow.name} Workflow Rule
+
+This rule defines the ${workflow.name} workflow.
+
+## Workflow Description
+
+${workflow.description || 'No description provided'}
+
+## Workflow Definition
+
+${content}
+
+## Usage
+
+Reference this workflow with \`@workflow-${workflow.name}\` to execute the guided workflow.
+
+## Module
+
+Part of the BMAD ${workflow.module.toUpperCase()} module.
+`;
+
+    return ruleContent;
+  }
+
+  /**
    * Format agent/task name as title
    */
   formatTitle(name) {
@@ -150,31 +238,27 @@ Part of the BMAD ${task.module.toUpperCase()} module.
   }
 
   /**
-   * Cleanup Trae configuration
+   * Cleanup Trae configuration - surgically remove only BMAD files
    */
   async cleanup(projectDir) {
     const fs = require('fs-extra');
     const rulesPath = path.join(projectDir, this.configDir, this.rulesDir);
 
     if (await fs.pathExists(rulesPath)) {
-      // Only remove BMAD rules
+      // Only remove files that start with bmad- prefix
       const files = await fs.readdir(rulesPath);
       let removed = 0;
 
       for (const file of files) {
-        if (file.endsWith('.md')) {
-          const filePath = path.join(rulesPath, file);
-          const content = await fs.readFile(filePath, 'utf8');
-
-          // Check if it's a BMAD rule
-          if (content.includes('BMAD') && content.includes('module')) {
-            await fs.remove(filePath);
-            removed++;
-          }
+        if (file.startsWith('bmad-') && file.endsWith('.md')) {
+          await fs.remove(path.join(rulesPath, file));
+          removed++;
         }
       }
 
-      console.log(chalk.dim(`Removed ${removed} BMAD rules from Trae`));
+      if (removed > 0) {
+        console.log(chalk.dim(`  Cleaned up ${removed} existing BMAD rules`));
+      }
     }
   }
 }

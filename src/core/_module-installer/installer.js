@@ -6,7 +6,7 @@ const chalk = require('chalk');
  *
  * @param {Object} options - Installation options
  * @param {string} options.projectRoot - The root directory of the target project
- * @param {Object} options.config - Module configuration from install-menu-config.yaml
+ * @param {Object} options.config - Module configuration from install-config.yaml
  * @param {Array<string>} options.installedIDEs - Array of IDE codes that were installed
  * @param {Object} options.logger - Logger instance for output
  * @returns {Promise<boolean>} - Success status
@@ -47,14 +47,6 @@ async function configureForIDE(ide) {
   switch (ide) {
     case 'claude-code': {
       // Claude Code specific Core configurations
-      break;
-    }
-    case 'cursor': {
-      // Cursor specific Core configurations
-      break;
-    }
-    case 'windsurf': {
-      // Windsurf specific Core configurations
       break;
     }
     // Add more IDEs as needed

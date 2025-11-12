@@ -1,7 +1,7 @@
 # Build Workflow - Workflow Builder Instructions
 
-<critical>The workflow execution engine is governed by: {project-root}/bmad/core/tasks/workflow.xml</critical>
-<critical>You MUST have already loaded and processed: {project-root}/bmad/bmb/workflows/create-workflow/workflow.yaml</critical>
+<critical>The workflow execution engine is governed by: {project-root}/{bmad_folder}/core/tasks/workflow.xml</critical>
+<critical>You MUST have already loaded and processed: {project-root}/{bmad_folder}/bmb/workflows/create-workflow/workflow.yaml</critical>
 <critical>You MUST fully understand the workflow creation guide at: {workflow_creation_guide}</critical>
 <critical>Study the guide thoroughly to follow ALL conventions for optimal human-AI collaboration</critical>
 <critical>Communicate in {communication_language} throughout the workflow creation process</critical>
@@ -13,7 +13,7 @@
 
 <action if="user_response == 'y' or user_response == 'yes'">
 Invoke brainstorming workflow to explore ideas and design concepts:
-- Workflow: {project-root}/bmad/core/workflows/brainstorming/workflow.yaml
+- Workflow: {project-root}/{bmad_folder}/core/workflows/brainstorming/workflow.yaml
 - Context data: {installed_path}/brainstorm-context.md
 - Purpose: Generate creative workflow ideas, explore different approaches, and clarify requirements
 
@@ -72,7 +72,7 @@ Based on type, determine which files are needed:
 Store decisions for later use.
 </step>
 
-<step n="2" goal="Gather workflow metadata">
+<step n="2" goal="Gather workflow metadata and invocation settings">
 Collect essential configuration details:
 - Description (clear purpose statement)
 - Author name (default to user_name or "BMad")
@@ -80,40 +80,152 @@ Collect essential configuration details:
 - Any required input documents
 - Any required tools or dependencies
 
+<action>Determine standalone property - this controls how the workflow can be invoked:
+
+Explain to the user:
+
+**Standalone Property** controls whether the workflow can be invoked directly or only called by other workflows/agents.
+
+**standalone: true (DEFAULT - Recommended for most workflows)**:
+
+- Users can invoke directly via IDE commands or `/workflow-name`
+- Shows up in IDE command palette
+- Can also be called from agent menus or other workflows
+- Use for: User-facing workflows, entry-point workflows, any workflow users run directly
+
+**standalone: false (Use for helper/internal workflows)**:
+
+- Cannot be invoked directly by users
+- Only called via `<invoke-workflow>` from other workflows or agent menus
+- Doesn't appear in IDE command palette
+- Use for: Internal utilities, sub-workflows, helpers that don't make sense standalone
+
+Most workflows should be `standalone: true` to give users direct access.
+</action>
+
+<ask>Should this workflow be directly invokable by users?
+
+1. **Yes (Recommended)** - Users can run it directly (standalone: true)
+2. **No** - Only called by other workflows/agents (standalone: false)
+
+Most workflows choose option 1:
+</ask>
+
+<action>Store {{standalone_setting}} as true or false based on response</action>
+
 Create the workflow name in kebab-case and verify it doesn't conflict with existing workflows.
 </step>
 
-<step n="3" goal="Design workflow steps">
-Work with user to outline the workflow steps:
-- How many major steps? (Recommend 5-10 max)
+<step n="3" goal="Understand workflow interaction style and design steps">
+<critical>Instruction style and interactivity level fundamentally shape the user experience - choose thoughtfully</critical>
+
+<action>Reference the comprehensive "Instruction Styles: Intent-Based vs Prescriptive" section from the loaded creation guide</action>
+
+<action>Discuss instruction style collaboratively with the user:
+
+Explain that there are two primary approaches:
+
+**Intent-Based (RECOMMENDED as default)**:
+
+- Gives AI goals and principles, lets it adapt conversation naturally
+- More flexible, conversational, responsive to user context
+- Better for: discovery, complex decisions, teaching, varied user skill levels
+- Uses <action> tags with guiding instructions
+- Example from architecture workflow: Facilitates decisions adapting to user_skill_level
+
+**Prescriptive**:
+
+- Provides exact questions and specific options
+- More controlled, predictable, consistent across runs
+- Better for: simple data collection, finite options, compliance, quick setup
+- Uses <ask> tags with specific question text
+- Example: Platform selection with 5 defined choices
+
+Explain that **most workflows should default to intent-based** but use prescriptive for simple data points.
+The architecture workflow is an excellent example of intent-based with prescriptive moments.
+</action>
+
+<ask>For this workflow's PRIMARY style:
+
+1. **Intent-based (Recommended)** - Adaptive, conversational, responds to user context
+2. **Prescriptive** - Structured, consistent, controlled interactions
+3. **Mixed/Balanced** - I'll help you decide step-by-step
+
+What feels right for your workflow's purpose?
+</ask>
+
+<action>Store {{instruction_style}} preference</action>
+
+<action>Now discuss interactivity level:
+
+Beyond style, consider **how interactive** this workflow should be:
+
+**High Interactivity (Collaborative)**:
+
+- Constant back-and-forth with user
+- User guides direction, AI facilitates
+- Iterative refinement and review
+- Best for: creative work, complex decisions, learning experiences
+- Example: Architecture workflow's collaborative decision-making
+
+**Medium Interactivity (Guided)**:
+
+- Key decision points have interaction
+- AI proposes, user confirms or refines
+- Validation checkpoints
+- Best for: most document workflows, structured processes
+- Example: PRD workflow with sections to review
+
+**Low Interactivity (Autonomous)**:
+
+- Minimal user input required
+- AI works independently with guidelines
+- User reviews final output
+- Best for: automated generation, batch processing
+- Example: Generating user stories from epics
+  </action>
+
+<ask>What interactivity level suits this workflow?
+
+1. **High** - Highly collaborative, user actively involved throughout (Recommended)
+2. **Medium** - Guided with key decision points
+3. **Low** - Mostly autonomous with final review
+
+Select the level that matches your workflow's purpose:
+</ask>
+
+<action>Store {{interactivity_level}} preference</action>
+
+<action>Explain how these choices will inform the workflow design:
+
+- Intent-based + High interactivity: Conversational discovery with open questions
+- Intent-based + Medium: Facilitated guidance with confirmation points
+- Intent-based + Low: Principle-based autonomous generation
+- Prescriptive + any level: Structured questions, but frequency varies
+- Mixed: Strategic use of both styles where each works best
+  </action>
+
+<action>Now work with user to outline workflow steps:
+
+- How many major steps? (Recommend 3-7 for most workflows)
 - What is the goal of each step?
 - Which steps are optional?
-- Which steps need user input?
+- Which steps need heavy user collaboration vs autonomous execution?
 - Which steps should repeat?
 - What variables/outputs does each step produce?
 
-<ask>What instruction style should this workflow favor?
+Consider their instruction_style and interactivity_level choices when designing step flow:
 
-**1. Intent-Based (Recommended)** - Guide the LLM with goals and principles, let it adapt conversations naturally
+- High interactivity: More granular steps with collaboration
+- Low interactivity: Larger autonomous steps with review
+- Intent-based: Focus on goals and principles in step descriptions
+- Prescriptive: Define specific questions and options
+  </action>
 
-- More flexible and conversational
-- LLM chooses appropriate questions based on context
-- Better for complex discovery and iterative refinement
-- Example: `<action>Guide user to define their target audience with specific demographics and needs</action>`
+<action>Create a step outline that matches the chosen style and interactivity level</action>
+<action>Note which steps should be intent-based vs prescriptive (if mixed approach)</action>
 
-**2. Prescriptive** - Provide exact wording for questions and options
-
-- More controlled and predictable
-- Ensures consistency across runs
-- Better for simple data collection or specific compliance needs
-- Example: `<ask>What is your target platform? Choose: PC, Console, Mobile, Web</ask>`
-
-Note: Your choice will be the _primary_ style, but we'll use the other when it makes more sense for specific steps.</ask>
-
-<action>Store instruction_style preference (intent-based or prescriptive)</action>
-<action>Explain that both styles have value and will be mixed appropriately</action>
-
-Create a step outline with clear goals and outputs.
+<template-output>step_outline</template-output>
 </step>
 
 <step n="4" goal="Create workflow.yaml">
@@ -130,6 +242,7 @@ Replace all placeholders following the workflow creation guide conventions:
 Include:
 
 - All metadata from steps 1-2
+- **Standalone property**: Use {{standalone_setting}} from step 2 (true or false)
 - Proper paths for installed_path using variable substitution
 - Template/instructions/validation paths based on workflow type:
   - Document workflow: all files (template, instructions, validation)
@@ -142,7 +255,7 @@ Include:
 
 ```yaml
 # Critical variables from config
-config_source: '{project-root}/bmad/{{target_module}}/config.yaml'
+config_source: '{project-root}/{bmad_folder}/{{target_module}}/config.yaml'
 output_folder: '{config_source}:output_folder'
 user_name: '{config_source}:user_name'
 communication_language: '{config_source}:communication_language'
@@ -150,6 +263,38 @@ date: system-generated
 ```
 
 <critical>This standard config ensures workflows can run autonomously and communicate properly with users</critical>
+
+<critical>ALWAYS include the standalone property:</critical>
+
+```yaml
+standalone: { { standalone_setting } } # true or false from step 2
+```
+
+**Example complete workflow.yaml structure**:
+
+```yaml
+name: 'workflow-name'
+description: 'Clear purpose statement'
+
+# Paths
+installed_path: '{project-root}/{bmad_folder}/module/workflows/name'
+template: '{installed_path}/template.md'
+instructions: '{installed_path}/instructions.md'
+validation: '{installed_path}/checklist.md'
+
+# Critical variables from config
+config_source: '{project-root}/{bmad_folder}/module/config.yaml'
+output_folder: '{config_source}:output_folder'
+user_name: '{config_source}:user_name'
+communication_language: '{config_source}:communication_language'
+date: system-generated
+
+# Output
+default_output_file: '{output_folder}/document.md'
+
+# Invocation control
+standalone: true # or false based on step 2 decision
+```
 
 Follow path conventions from guide:
 
@@ -169,7 +314,7 @@ Load and use the template at: {template_instructions}
 Generate the instructions.md file following the workflow creation guide:
 
 1. ALWAYS include critical headers:
-   - Workflow engine reference: {project-root}/bmad/core/tasks/workflow.xml
+   - Workflow engine reference: {project-root}/{bmad_folder}/core/tasks/workflow.xml
    - workflow.yaml reference: must be loaded and processed
 
 2. Structure with <workflow> tags containing all steps
@@ -183,7 +328,7 @@ Generate the instructions.md file following the workflow creation guide:
 
 4. Use proper XML tags from guide:
    - Execution: <action>, <check>, <ask>, <goto>, <invoke-workflow>
-   - Output: <template-output>, <invoke-task halt="true">{project-root}/bmad/core/tasks/adv-elicit.xml</invoke-task>, <critical>, <example>
+   - Output: <template-output>, <invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/adv-elicit.xml</invoke-task>, <critical>, <example>
    - Flow: <loop>, <break>, <continue>
 
 5. Best practices from guide:
@@ -345,6 +490,7 @@ Generate the template.md file following guide conventions:
    # Document Title
 
    **Date:** {{date}}
+
    **Author:** {{user_name}}
    ```
 
@@ -433,7 +579,9 @@ Review the created workflow:
 4. Validate YAML syntax
 5. Confirm all placeholders are replaced
 
-**Standard Config Validation:** 6. Verify workflow.yaml contains standard config block:
+**Standard Config Validation:**
+
+6. Verify workflow.yaml contains standard config block:
 
 - config_source defined
 - output_folder, user_name, communication_language pulled from config
@@ -442,7 +590,9 @@ Review the created workflow:
 7. Check instructions use config variables where appropriate
 8. Verify template includes config variables in metadata (if document workflow)
 
-**YAML/Instruction/Template Alignment:** 9. Cross-check all workflow.yaml variables against instruction usage:
+**YAML/Instruction/Template Alignment:**
+
+9. Cross-check all workflow.yaml variables against instruction usage:
 
 - Are all yaml variables referenced in instructions.md OR template.md?
 - Are there hardcoded values that should be variables?
@@ -466,15 +616,15 @@ If yes:
 
 - Web bundles are self-contained and cannot use config_source variables
 - All files must be explicitly listed in web_bundle_files
-- File paths use bmad/ root (not {project-root})
+- File paths use {bmad_folder}/ root (not {project-root})
 
 <action>Configure web_bundle section in workflow.yaml:</action>
 
 1. Copy core workflow metadata (name, description, author)
-2. Convert all file paths to bmad/-relative paths:
+2. Convert all file paths to {bmad_folder}/-relative paths:
    - Remove {project-root}/ prefix
    - Remove {config_source} references (use hardcoded values)
-   - Example: "{project-root}/bmad/bmm/workflows/x" → "bmad/bmm/workflows/x"
+   - Example: "{project-root}/{bmad_folder}/bmm/workflows/x" → "{bmad_folder}/bmm/workflows/x"
 
 3. List ALL referenced files by scanning:
 
@@ -492,8 +642,8 @@ If yes:
 
    **Critical: Workflow Dependencies**
    - If instructions call another workflow, that workflow's yaml MUST be in web_bundle_files
-   - Example: `<invoke-workflow>{project-root}/bmad/core/workflows/x/workflow.yaml</invoke-workflow>`
-     → Add "bmad/core/workflows/x/workflow.yaml" to web_bundle_files
+   - Example: `<invoke-workflow>{project-root}/{bmad_folder}/core/workflows/x/workflow.yaml</invoke-workflow>`
+     → Add "{bmad_folder}/core/workflows/x/workflow.yaml" to web_bundle_files
 
 4. Create web_bundle_files array with complete list
 
@@ -504,24 +654,24 @@ web_bundle:
   name: '{workflow_name}'
   description: '{workflow_description}'
   author: '{author}'
-  instructions: 'bmad/{module}/workflows/{workflow}/instructions.md'
-  validation: 'bmad/{module}/workflows/{workflow}/checklist.md'
-  template: 'bmad/{module}/workflows/{workflow}/template.md'
+  instructions: '{bmad_folder}/{module}/workflows/{workflow}/instructions.md'
+  validation: '{bmad_folder}/{module}/workflows/{workflow}/checklist.md'
+  template: '{bmad_folder}/{module}/workflows/{workflow}/template.md'
 
   # Any data files (no config_source)
-  data_file: 'bmad/{module}/workflows/{workflow}/data.csv'
+  data_file: '{bmad_folder}/{module}/workflows/{workflow}/data.csv'
 
   web_bundle_files:
-    - 'bmad/{module}/workflows/{workflow}/instructions.md'
-    - 'bmad/{module}/workflows/{workflow}/checklist.md'
-    - 'bmad/{module}/workflows/{workflow}/template.md'
-    - 'bmad/{module}/workflows/{workflow}/data.csv'
+    - '{bmad_folder}/{module}/workflows/{workflow}/instructions.md'
+    - '{bmad_folder}/{module}/workflows/{workflow}/checklist.md'
+    - '{bmad_folder}/{module}/workflows/{workflow}/template.md'
+    - '{bmad_folder}/{module}/workflows/{workflow}/data.csv'
     # Add every single file referenced anywhere
 
   # CRITICAL: If this workflow invokes other workflows, use existing_workflows
   # This signals the bundler to recursively include those workflows' web_bundles
   existing_workflows:
-    - workflow_variable_name: 'bmad/path/to/workflow.yaml'
+    - workflow_variable_name: '{bmad_folder}/path/to/workflow.yaml'
 ```
 
 **Example with existing_workflows:**
@@ -531,14 +681,14 @@ web_bundle:
   name: 'brainstorm-game'
   description: 'Game brainstorming with CIS workflow'
   author: 'BMad'
-  instructions: 'bmad/bmm/workflows/brainstorm-game/instructions.md'
+  instructions: '{bmad_folder}/bmm/workflows/brainstorm-game/instructions.md'
   template: false
   web_bundle_files:
-    - 'bmad/bmm/workflows/brainstorm-game/instructions.md'
-    - 'bmad/mmm/workflows/brainstorm-game/game-context.md'
-    - 'bmad/core/workflows/brainstorming/workflow.yaml'
+    - '{bmad_folder}/bmm/workflows/brainstorm-game/instructions.md'
+    - '{bmad_folder}/mmm/workflows/brainstorm-game/game-context.md'
+    - '{bmad_folder}/core/workflows/brainstorming/workflow.yaml'
   existing_workflows:
-    - core_brainstorming: 'bmad/core/workflows/brainstorming/workflow.yaml'
+    - core_brainstorming: '{bmad_folder}/core/workflows/brainstorming/workflow.yaml'
 ```
 
 **What existing_workflows does:**
@@ -546,13 +696,13 @@ web_bundle:
 - Tells the bundler this workflow invokes another workflow
 - Bundler recursively includes the invoked workflow's entire web_bundle
 - Essential for meta-workflows that orchestrate other workflows
-- Maps workflow variable names to their bmad/-relative paths
+- Maps workflow variable names to their {bmad_folder}/-relative paths
 
 <action>Validate web bundle completeness:</action>
 
 - Ensure no {config_source} variables remain
 - Verify all file paths are listed
-- Check that paths are bmad/-relative
+- Check that paths are {bmad_folder}/-relative
 - If workflow uses <invoke-workflow>, add to existing_workflows
 
 <template-output>web_bundle_config</template-output>

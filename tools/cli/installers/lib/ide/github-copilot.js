@@ -2,6 +2,7 @@ const path = require('node:path');
 const { BaseIdeSetup } = require('./_base-ide');
 const chalk = require('chalk');
 const inquirer = require('inquirer');
+const { AgentCommandGenerator } = require('./shared/agent-command-generator');
 
 /**
  * GitHub Copilot setup handler
@@ -101,20 +102,25 @@ class GitHubCopilotSetup extends BaseIdeSetup {
     const chatmodesDir = path.join(githubDir, this.chatmodesDir);
     await this.ensureDir(chatmodesDir);
 
-    // Get agents
-    const agents = await this.getAgents(bmadDir);
+    // Clean up any existing BMAD files before reinstalling
+    await this.cleanup(projectDir);
 
-    // Create chat mode files
+    // Generate agent launchers
+    const agentGen = new AgentCommandGenerator(this.bmadFolderName);
+    const { artifacts: agentArtifacts } = await agentGen.collectAgentArtifacts(bmadDir, options.selectedModules || []);
+
+    // Create chat mode files with bmad- prefix
     let modeCount = 0;
-    for (const agent of agents) {
-      const content = await this.readFile(agent.path);
-      const chatmodeContent = this.createChatmodeContent(agent, content);
+    for (const artifact of agentArtifacts) {
+      const content = artifact.content;
+      const chatmodeContent = await this.createChatmodeContent({ module: artifact.module, name: artifact.name }, content);
 
-      const targetPath = path.join(chatmodesDir, `${agent.module}-${agent.name}.chatmode.md`);
+      // Use bmad- prefix: bmad-agent-{module}-{name}.chatmode.md
+      const targetPath = path.join(chatmodesDir, `bmad-agent-${artifact.module}-${artifact.name}.chatmode.md`);
       await this.writeFile(targetPath, chatmodeContent);
       modeCount++;
 
-      console.log(chalk.green(`  ✓ Created chat mode: ${agent.module}-${agent.name}`));
+      console.log(chalk.green(`  ✓ Created chat mode: bmad-agent-${artifact.module}-${artifact.name}`));
     }
 
     console.log(chalk.green(`✓ ${this.name} configured:`));
@@ -202,32 +208,45 @@ class GitHubCopilotSetup extends BaseIdeSetup {
   /**
    * Create chat mode content
    */
-  createChatmodeContent(agent, content) {
-    // Extract metadata
-    const titleMatch = content.match(/title="([^"]+)"/);
-    const title = titleMatch ? titleMatch[1] : this.formatTitle(agent.name);
+  async createChatmodeContent(agent, content) {
+    // Extract metadata from launcher frontmatter if present
+    const descMatch = content.match(/description:\s*"([^"]+)"/);
+    const title = descMatch ? descMatch[1] : this.formatTitle(agent.name);
 
-    const whenToUseMatch = content.match(/whenToUse="([^"]+)"/);
-    const description = whenToUseMatch ? whenToUseMatch[1] : `Activates the ${title} agent persona.`;
+    const description = `Activates the ${title} agent persona.`;
 
-    // Available GitHub Copilot tools
+    // Strip any existing frontmatter from the content
+    const frontmatterRegex = /^---\s*\n[\s\S]*?\n---\s*\n/;
+    let cleanContent = content;
+    if (frontmatterRegex.test(content)) {
+      cleanContent = content.replace(frontmatterRegex, '').trim();
+    }
+
+    // Available GitHub Copilot tools (November 2025 - Official VS Code Documentation)
+    // Reference: https://code.visualstudio.com/docs/copilot/reference/copilot-vscode-features#_chat-tools
     const tools = [
-      'changes',
-      'codebase',
-      'fetch',
-      'findTestFiles',
-      'githubRepo',
-      'problems',
-      'usages',
-      'editFiles',
-      'runCommands',
-      'runTasks',
-      'runTests',
-      'search',
-      'searchResults',
-      'terminalLastCommand',
-      'terminalSelection',
-      'testFailure',
+      'changes', // List of source control changes
+      'codebase', // Perform code search in workspace
+      'createDirectory', // Create new directory in workspace
+      'createFile', // Create new file in workspace
+      'editFiles', // Apply edits to files in workspace
+      'fetch', // Fetch content from web page
+      'fileSearch', // Search files using glob patterns
+      'githubRepo', // Perform code search in GitHub repo
+      'listDirectory', // List files in a directory
+      'problems', // Add workspace issues from Problems panel
+      'readFile', // Read content of a file in workspace
+      'runInTerminal', // Run shell command in integrated terminal
+      'runTask', // Run existing task in workspace
+      'runTests', // Run unit tests in workspace
+      'runVscodeCommand', // Run VS Code command
+      'search', // Enable file searching in workspace
+      'searchResults', // Get search results from Search view
+      'terminalLastCommand', // Get last terminal command and output
+      'terminalSelection', // Get current terminal selection
+      'testFailure', // Get unit test failure information
+      'textSearch', // Find text in files
+      'usages', // Find references and navigate definitions
     ];
 
     let chatmodeContent = `---
@@ -237,11 +256,8 @@ tools: ${JSON.stringify(tools)}
 
 # ${title} Agent
 
-${content}
+${cleanContent}
 
-## Module
-
-Part of the BMAD ${agent.module.toUpperCase()} module.
 `;
 
     return chatmodeContent;
@@ -258,30 +274,27 @@ Part of the BMAD ${agent.module.toUpperCase()} module.
   }
 
   /**
-   * Cleanup GitHub Copilot configuration
+   * Cleanup GitHub Copilot configuration - surgically remove only BMAD files
    */
   async cleanup(projectDir) {
     const fs = require('fs-extra');
     const chatmodesDir = path.join(projectDir, this.configDir, this.chatmodesDir);
 
     if (await fs.pathExists(chatmodesDir)) {
-      // Remove BMAD chat modes
+      // Only remove files that start with bmad- prefix
       const files = await fs.readdir(chatmodesDir);
       let removed = 0;
 
       for (const file of files) {
-        if (file.endsWith('.chatmode.md')) {
-          const filePath = path.join(chatmodesDir, file);
-          const content = await fs.readFile(filePath, 'utf8');
-
-          if (content.includes('BMAD') && content.includes('Module')) {
-            await fs.remove(filePath);
-            removed++;
-          }
+        if (file.startsWith('bmad-') && file.endsWith('.chatmode.md')) {
+          await fs.remove(path.join(chatmodesDir, file));
+          removed++;
         }
       }
 
-      console.log(chalk.dim(`Removed ${removed} BMAD chat modes from GitHub Copilot`));
+      if (removed > 0) {
+        console.log(chalk.dim(`  Cleaned up ${removed} existing BMAD chat modes`));
+      }
     }
   }
 }

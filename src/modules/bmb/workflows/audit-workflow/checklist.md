@@ -45,7 +45,7 @@
 ## Web Bundle Validation (if applicable)
 
 - [ ] web_bundle section present if workflow needs deployment
-- [ ] All paths in web_bundle use bmad/-relative format (NOT {project-root})
+- [ ] All paths in web_bundle use {bmad_folder}/-relative format (NOT {project-root})
 - [ ] No {config_source} variables in web_bundle section
 - [ ] instructions file listed in web_bundle_files array
 - [ ] template file listed in web_bundle_files (if document workflow)
@@ -53,7 +53,7 @@
 - [ ] All data files (CSV, JSON, YAML) listed in web_bundle_files
 - [ ] All <invoke-workflow> called workflows have their .yaml files in web_bundle_files
 - [ ] **CRITICAL**: If workflow invokes other workflows, existing_workflows field is present
-- [ ] existing_workflows maps workflow variables to bmad/-relative paths correctly
+- [ ] existing_workflows maps workflow variables to {bmad_folder}/-relative paths correctly
 - [ ] All files referenced in instructions <action> tags listed in web_bundle_files
 - [ ] No files listed in web_bundle_files that don't exist
 - [ ] Web bundle metadata (name, description, author) matches top-level metadata
@@ -76,6 +76,11 @@
 - [ ] Repeating steps have appropriate repeat attribute (repeat="3", repeat="for-each-X", repeat="until-approved")
 - [ ] Conditional steps have if="condition" attribute
 - [ ] XML tags used correctly (<action>, <ask>, <check>, <goto>, <invoke-workflow>, <template-output>)
+- [ ] No nested tag references in content (use "action tags" not "<action> tags")
+- [ ] Tag references use descriptive text without angle brackets for clarity
+- [ ] No conditional execution antipattern (no self-closing <check> tags)
+- [ ] Single conditionals use <action if="condition"> (inline)
+- [ ] Multiple conditionals use <check if="condition">...</check> (wrapper block with closing tag)
 - [ ] Steps are focused (single goal per step)
 - [ ] Instructions are specific with limits ("Write 1-2 paragraphs" not "Write about")
 - [ ] Examples provided where helpful
@@ -120,10 +125,9 @@ _List any cleanup recommendations:_
 
 ## Audit Summary
 
-**Total Checks:** 70
-**Passed:** **\_** / 70
-**Failed:** **\_** / 70
-**Pass Rate:** **\_**%
+**Total Checks:**
+**Passed:** {total}
+**Failed:** {total}
 
 **Recommendation:**
 
