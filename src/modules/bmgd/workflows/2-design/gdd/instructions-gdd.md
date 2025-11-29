@@ -13,6 +13,7 @@
 <critical>If users mention technical details, append to technical_preferences with timestamp</critical>
 
 <critical>DOCUMENT OUTPUT: Concise, clear, actionable game design specs. Use tables/lists over prose. User skill level ({user_skill_level}) affects conversation style ONLY, not document content.</critical>
+<critical>⚠️ CHECKPOINT PROTOCOL: After EVERY <template-output> tag, you MUST follow workflow.xml substep 2c: SAVE content to file immediately → SHOW checkpoint separator (━━━━━━━━━━━━━━━━━━━━━━━) → DISPLAY generated content → PRESENT options [a]Advanced Elicitation/[c]Continue/[p]Party-Mode/[y]YOLO → WAIT for user response. Never batch saves or skip checkpoints.</critical>
 
 ## Input Document Discovery
 
@@ -26,7 +27,7 @@ This workflow requires: game brief, and may reference market research or brownfi
    - Read `index.md` to understand the document structure
    - Read ALL section files listed in the index
    - Treat the combined content as if it were a single document
-4. **Brownfield projects**: The `document-project` workflow always creates `{output_folder}/docs/index.md`
+4. **Brownfield projects**: The `document-project` workflow always creates `{output_folder}/index.md`
 
 **Priority**: If both whole and sharded versions exist, use the whole document.
 
@@ -221,7 +222,6 @@ Get core game concept and vision.
 <action>Guide user to define the primary game mechanics that players will interact with throughout the game</action>
 
 <template-output>primary_mechanics</template-output>
-<invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/adv-elicit.xml</invoke-task>
 
 <action>Guide user to describe their control scheme and input method (keyboard/mouse, gamepad, touchscreen, etc.), including key bindings or button layouts if known</action>
 
@@ -238,8 +238,6 @@ Get core game concept and vision.
 For each {{placeholder}} in the fragment, elicit and capture that information.
 
 <template-output file="GDD.md">GAME_TYPE_SPECIFIC_SECTIONS</template-output>
-
-<invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/adv-elicit.xml</invoke-task>
 
 </step>
 
@@ -304,7 +302,6 @@ For each {{placeholder}} in the fragment, elicit and capture that information.
 <action>Work with user to translate game features into development epics, following level-appropriate guidelines (Level 1: 1 epic/1-10 stories, Level 2: 1-2 epics/5-15 stories, Level 3: 2-5 epics/12-40 stories, Level 4: 5+ epics/40+ stories)</action>
 
 <template-output>epics</template-output>
-<invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/adv-elicit.xml</invoke-task>
 
 </step>
 
@@ -325,7 +322,6 @@ For each {{placeholder}} in the fragment, elicit and capture that information.
 <for-each epic="epic_list">
 
 <template-output file="epics.md">epic*{{epic_number}}*details</template-output>
-<invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/adv-elicit.xml</invoke-task>
 
 </for-each>
 

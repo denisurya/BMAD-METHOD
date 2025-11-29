@@ -63,6 +63,11 @@ src/modules/bmb/sub-modules/
 src/modules/cis/sub-modules/
 src/modules/bmgd/sub-modules/
 
-# Test Install Output
+z*/
 
-z*/.claude/settings.local.json
+.bmad
+.claude
+.codex
+.github/chatmodes
+.agent
+.agentvibes/

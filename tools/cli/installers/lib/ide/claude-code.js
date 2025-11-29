@@ -1,4 +1,5 @@
 const path = require('node:path');
+const fs = require('fs-extra');
 const { BaseIdeSetup } = require('./_base-ide');
 const chalk = require('chalk');
 const { getProjectRoot, getSourcePath, getModulePath } = require('../../../lib/project-root');
@@ -43,7 +44,6 @@ class ClaudeCodeSetup extends BaseIdeSetup {
       const injectionConfigPath = path.join(sourceModulesPath, moduleName, 'sub-modules', 'claude-code', 'injections.yaml');
 
       if (await this.exists(injectionConfigPath)) {
-        const fs = require('fs-extra');
         const yaml = require('js-yaml');
 
         try {
@@ -87,7 +87,6 @@ class ClaudeCodeSetup extends BaseIdeSetup {
    * @param {string} projectDir - Project directory
    */
   async cleanup(projectDir) {
-    const fs = require('fs-extra');
     const bmadCommandsDir = path.join(projectDir, this.configDir, this.commandsDir, 'bmad');
 
     if (await fs.pathExists(bmadCommandsDir)) {
@@ -199,7 +198,6 @@ class ClaudeCodeSetup extends BaseIdeSetup {
    * Read and process file content
    */
   async readAndProcess(filePath, metadata) {
-    const fs = require('fs-extra');
     const content = await fs.readFile(filePath, 'utf8');
     return this.processContent(content, metadata);
   }
@@ -216,7 +214,6 @@ class ClaudeCodeSetup extends BaseIdeSetup {
    * Get agents from source modules (not installed location)
    */
   async getAgentsFromSource(sourceDir, selectedModules) {
-    const fs = require('fs-extra');
     const agents = [];
 
     // Add core agents
@@ -395,7 +392,6 @@ class ClaudeCodeSetup extends BaseIdeSetup {
    * Inject content at specified point in file
    */
   async injectContent(projectDir, injection, subagentChoices = null) {
-    const fs = require('fs-extra');
     const targetPath = path.join(projectDir, injection.file);
 
     if (await this.exists(targetPath)) {
@@ -421,7 +417,6 @@ class ClaudeCodeSetup extends BaseIdeSetup {
    * Copy selected subagents to appropriate Claude agents directory
    */
   async copySelectedSubagents(projectDir, handlerBaseDir, subagentConfig, choices, location) {
-    const fs = require('fs-extra');
     const os = require('node:os');
 
     // Determine target directory based on user choice
@@ -465,6 +460,49 @@ class ClaudeCodeSetup extends BaseIdeSetup {
     if (copiedCount > 0) {
       console.log(chalk.dim(`  Total subagents installed: ${copiedCount}`));
     }
+  }
+
+  /**
+   * Install a custom agent launcher for Claude Code
+   * @param {string} projectDir - Project directory
+   * @param {string} agentName - Agent name (e.g., "fred-commit-poet")
+   * @param {string} agentPath - Path to compiled agent (relative to project root)
+   * @param {Object} metadata - Agent metadata
+   * @returns {Object|null} Info about created command
+   */
+  async installCustomAgentLauncher(projectDir, agentName, agentPath, metadata) {
+    const customAgentsDir = path.join(projectDir, this.configDir, this.commandsDir, 'bmad', 'custom', 'agents');
+
+    if (!(await this.exists(path.join(projectDir, this.configDir)))) {
+      return null; // IDE not configured for this project
+    }
+
+    await this.ensureDir(customAgentsDir);
+
+    const launcherContent = `---
+name: '${agentName}'
+description: '${agentName} agent'
+---
+
+You must fully embody this agent's persona and follow all activation instructions exactly as specified. NEVER break character until given an exit command.
+
+<agent-activation CRITICAL="TRUE">
+1. LOAD the FULL agent file from @${agentPath}
+2. READ its entire contents - this contains the complete agent persona, menu, and instructions
+3. FOLLOW every step in the <activation> section precisely
+4. DISPLAY the welcome/greeting as instructed
+5. PRESENT the numbered menu
+6. WAIT for user input before proceeding
+</agent-activation>
+`;
+
+    const launcherPath = path.join(customAgentsDir, `${agentName}.md`);
+    await this.writeFile(launcherPath, launcherContent);
+
+    return {
+      path: launcherPath,
+      command: `/bmad:custom:agents:${agentName}`,
+    };
   }
 }
 

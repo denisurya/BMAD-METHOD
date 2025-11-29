@@ -156,7 +156,7 @@ For Modules:
 <action>Example path conversions:
 
 - exec="{project-root}/{bmad_folder}/{{target_module}}/tasks/task-name.md"
-- run-workflow="{project-root}/{bmad_folder}/{{target_module}}/workflows/workflow-name/workflow.yaml"
+- workflow="{project-root}/{bmad_folder}/{{target_module}}/workflows/workflow-name/workflow.yaml"
 - data="{project-root}/{bmad_folder}/{{target_module}}/data/data-file.yaml"
   </action>
   <action>Save to: {bmad_folder}/{{target_module}}/agents/{{agent_name}}.agent.yaml (physical location)</action>
@@ -193,7 +193,7 @@ For Modules:
 
 2. Convert template sections to instructions.md:
    - Each YAML section → workflow step
-   - `elicit: true` → `<invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/adv-elicit.xml</invoke-task>` tag
+   - `elicit: true` → `<invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/advanced-elicitation.xml</invoke-task>` tag
    - Conditional sections → `if="condition"` attribute
    - Repeatable sections → `repeat="for-each"` attribute
    - Section instructions → step content
@@ -277,7 +277,7 @@ date: system-generated
    </check>
 
 4. Handle special v4 patterns:
-   - 1-9 elicitation menus → v6 <invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/adv-elicit.xml</invoke-task>
+   - 1-9 elicitation menus → v6 <invoke-task halt="true">{project-root}/{bmad_folder}/core/tasks/advanced-elicitation.xml</invoke-task>
    - Agent permissions → note in instructions
    - YOLO mode → autonomous flag or optional steps
    - Critical notices → workflow.yaml comments
