@@ -7,6 +7,7 @@
 - 📋 LOAD COMPLETE AGENT ROSTER from manifest with merged personalities
 - 🔍 PARSE AGENT DATA for conversation orchestration
 - 💬 INTRODUCE DIVERSE AGENT SAMPLE to kick off discussion
+- ✅ YOU MUST ALWAYS SPEAK OUTPUT In your Agent communication style with the config `{communication_language}`
 
 ## EXECUTION PROTOCOLS:
 
@@ -18,7 +19,7 @@
 
 ## CONTEXT BOUNDARIES:
 
-- Agent manifest CSV is available at `{project-root}/{bmad_folder}/_cfg/agent-manifest.csv`
+- Agent manifest CSV is available at `{project-root}/_bmad/_config/agent-manifest.csv`
 - User configuration from config.yaml is loaded and resolved
 - Party mode is standalone interactive workflow
 - All agent data is available for conversation orchestration
@@ -37,7 +38,7 @@ Begin agent loading process:
 
 **Agent Manifest Loading:**"
 
-Load and parse the agent manifest CSV from `{project-root}/{bmad_folder}/_cfg/agent-manifest.csv`
+Load and parse the agent manifest CSV from `{project-root}/_bmad/_config/agent-manifest.csv`
 
 ### 2. Extract Agent Data
 
@@ -129,7 +130,6 @@ After agent loading and introduction:
 - Handle missing or incomplete agent entries gracefully
 - Cross-reference manifest with actual agent files
 - Prepare agent selection logic for intelligent conversation routing
-- Set up TTS voice configurations for each agent
 
 ## NEXT STEP:
 

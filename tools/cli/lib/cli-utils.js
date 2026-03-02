@@ -1,8 +1,6 @@
-const chalk = require('chalk');
-const boxen = require('boxen');
-const wrapAnsi = require('wrap-ansi');
-const figlet = require('figlet');
 const path = require('node:path');
+const os = require('node:os');
+const prompts = require('./prompts');
 
 const CLIUtils = {
   /**
@@ -18,27 +16,32 @@ const CLIUtils = {
   },
 
   /**
-   * Display BMAD logo
-   * @param {boolean} clearScreen - Whether to clear the screen first (default: true for initial display only)
+   * Display BMAD logo using @clack intro + box
+   * @param {boolean} _clearScreen - Deprecated, ignored (no longer clears screen)
    */
-  displayLogo(clearScreen = true) {
-    if (clearScreen) {
-      console.clear();
-    }
-
+  async displayLogo(_clearScreen = true) {
     const version = this.getVersion();
+    const color = await prompts.getColor();
 
     // ASCII art logo
-    const logo = `
-    ██████╗ ███╗   ███╗ █████╗ ██████╗ ™
-    ██╔══██╗████╗ ████║██╔══██╗██╔══██╗
-    ██████╔╝██╔████╔██║███████║██║  ██║
-    ██╔══██╗██║╚██╔╝██║██╔══██║██║  ██║
-    ██████╔╝██║ ╚═╝ ██║██║  ██║██████╔╝
-    ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝`;
+    const logo = [
+      '    ██████╗ ███╗   ███╗ █████╗ ██████╗ ™',
+      '    ██╔══██╗████╗ ████║██╔══██╗██╔══██╗',
+      '    ██████╔╝██╔████╔██║███████║██║  ██║',
+      '    ██╔══██╗██║╚██╔╝██║██╔══██║██║  ██║',
+      '    ██████╔╝██║ ╚═╝ ██║██║  ██║██████╔╝',
+      '    ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝╚═════╝',
+    ]
+      .map((line) => color.yellow(line))
+      .join('\n');
 
-    console.log(chalk.cyan(logo));
-    console.log(chalk.dim(`    Build More, Architect Dreams`) + chalk.cyan.bold(` v${version}`) + '\n');
+    const tagline = '    Build More, Architect Dreams';
+
+    await prompts.box(`${logo}\n${tagline}`, `v${version}`, {
+      contentAlign: 'center',
+      rounded: true,
+      formatBorder: color.blue,
+    });
   },
 
   /**
@@ -46,13 +49,8 @@ const CLIUtils = {
    * @param {string} title - Section title
    * @param {string} subtitle - Optional subtitle
    */
-  displaySection(title, subtitle = null) {
-    console.log('\n' + chalk.cyan('═'.repeat(80)));
-    console.log(chalk.cyan.bold(` ${title}`));
-    if (subtitle) {
-      console.log(chalk.dim(` ${subtitle}`));
-    }
-    console.log(chalk.cyan('═'.repeat(80)) + '\n');
+  async displaySection(title, subtitle = null) {
+    await prompts.note(subtitle || '', title);
   },
 
   /**
@@ -60,57 +58,43 @@ const CLIUtils = {
    * @param {string|Array} content - Content to display
    * @param {Object} options - Box options
    */
-  displayBox(content, options = {}) {
-    const defaultOptions = {
-      padding: 1,
-      margin: 1,
-      borderStyle: 'round',
-      borderColor: 'cyan',
-      ...options,
-    };
-
-    // Handle array content
+  async displayBox(content, options = {}) {
     let text = content;
     if (Array.isArray(content)) {
       text = content.join('\n\n');
     }
 
-    // Wrap text to prevent overflow
-    const wrapped = wrapAnsi(text, 76, { hard: true, wordWrap: true });
+    const color = await prompts.getColor();
+    const borderColor = options.borderColor || 'cyan';
+    const colorMap = { green: color.green, red: color.red, yellow: color.yellow, cyan: color.cyan, blue: color.blue };
+    const formatBorder = colorMap[borderColor] || color.cyan;
 
-    console.log(boxen(wrapped, defaultOptions));
+    await prompts.box(text, options.title, {
+      rounded: options.borderStyle === 'round' || options.borderStyle === undefined,
+      formatBorder,
+    });
   },
 
   /**
    * Display module configuration header
    * @param {string} moduleName - Module name (fallback if no custom header)
-   * @param {string} header - Custom header from install-config.yaml
-   * @param {string} subheader - Custom subheader from install-config.yaml
+   * @param {string} header - Custom header from module.yaml
+   * @param {string} subheader - Custom subheader from module.yaml
    */
-  displayModuleConfigHeader(moduleName, header = null, subheader = null) {
-    // Simple blue banner with custom header/subheader if provided
-    console.log('\n' + chalk.cyan('─'.repeat(80)));
-    console.log(chalk.cyan(header || `Configuring ${moduleName.toUpperCase()} Module`));
-    if (subheader) {
-      console.log(chalk.dim(`${subheader}`));
-    }
-    console.log(chalk.cyan('─'.repeat(80)) + '\n');
+  async displayModuleConfigHeader(moduleName, header = null, subheader = null) {
+    const title = header || `Configuring ${moduleName.toUpperCase()} Module`;
+    await prompts.note(subheader || '', title);
   },
 
   /**
    * Display module with no custom configuration
    * @param {string} moduleName - Module name (fallback if no custom header)
-   * @param {string} header - Custom header from install-config.yaml
-   * @param {string} subheader - Custom subheader from install-config.yaml
+   * @param {string} header - Custom header from module.yaml
+   * @param {string} subheader - Custom subheader from module.yaml
    */
-  displayModuleNoConfig(moduleName, header = null, subheader = null) {
-    // Show full banner with header/subheader, just like modules with config
-    console.log('\n' + chalk.cyan('─'.repeat(80)));
-    console.log(chalk.cyan(header || `${moduleName.toUpperCase()} Module - No Custom Configuration`));
-    if (subheader) {
-      console.log(chalk.dim(`${subheader}`));
-    }
-    console.log(chalk.cyan('─'.repeat(80)) + '\n');
+  async displayModuleNoConfig(moduleName, header = null, subheader = null) {
+    const title = header || `${moduleName.toUpperCase()} Module - No Custom Configuration`;
+    await prompts.note(subheader || '', title);
   },
 
   /**
@@ -119,42 +103,33 @@ const CLIUtils = {
    * @param {number} total - Total steps
    * @param {string} description - Step description
    */
-  displayStep(current, total, description) {
+  async displayStep(current, total, description) {
     const progress = `[${current}/${total}]`;
-    console.log('\n' + chalk.cyan(progress) + ' ' + chalk.bold(description));
-    console.log(chalk.dim('─'.repeat(80 - progress.length - 1)) + '\n');
+    await prompts.log.step(`${progress} ${description}`);
   },
 
   /**
    * Display completion message
    * @param {string} message - Completion message
    */
-  displayComplete(message) {
-    console.log(
-      '\n' +
-        boxen(chalk.green('✨ ' + message), {
-          padding: 1,
-          margin: 1,
-          borderStyle: 'round',
-          borderColor: 'green',
-        }),
-    );
+  async displayComplete(message) {
+    const color = await prompts.getColor();
+    await prompts.box(`\u2728 ${message}`, 'Complete', {
+      rounded: true,
+      formatBorder: color.green,
+    });
   },
 
   /**
    * Display error message
    * @param {string} message - Error message
    */
-  displayError(message) {
-    console.log(
-      '\n' +
-        boxen(chalk.red('✗ ' + message), {
-          padding: 1,
-          margin: 1,
-          borderStyle: 'round',
-          borderColor: 'red',
-        }),
-    );
+  async displayError(message) {
+    const color = await prompts.getColor();
+    await prompts.box(`\u2717 ${message}`, 'Error', {
+      rounded: true,
+      formatBorder: color.red,
+    });
   },
 
   /**
@@ -162,7 +137,7 @@ const CLIUtils = {
    * @param {Array} items - Items to display
    * @param {string} prefix - Item prefix
    */
-  formatList(items, prefix = '•') {
+  formatList(items, prefix = '\u2022') {
     return items.map((item) => `  ${prefix} ${item}`).join('\n');
   },
 
@@ -178,25 +153,6 @@ const CLIUtils = {
   },
 
   /**
-   * Display table
-   * @param {Array} data - Table data
-   * @param {Object} options - Table options
-   */
-  displayTable(data, options = {}) {
-    const Table = require('cli-table3');
-    const table = new Table({
-      style: {
-        head: ['cyan'],
-        border: ['dim'],
-      },
-      ...options,
-    });
-
-    for (const row of data) table.push(row);
-    console.log(table.toString());
-  },
-
-  /**
    * Display module completion message
    * @param {string} moduleName - Name of the completed module
    * @param {boolean} clearScreen - Whether to clear the screen first (deprecated, always false now)
@@ -204,6 +160,22 @@ const CLIUtils = {
   displayModuleComplete(moduleName, clearScreen = false) {
     // No longer clear screen or show boxes - just a simple completion message
     // This is deprecated but kept for backwards compatibility
+  },
+
+  /**
+   * Expand path with ~ expansion
+   * @param {string} inputPath - Path to expand
+   * @returns {string} Expanded path
+   */
+  expandPath(inputPath) {
+    if (!inputPath) return inputPath;
+
+    // Expand ~ to home directory
+    if (inputPath.startsWith('~')) {
+      return path.join(os.homedir(), inputPath.slice(1));
+    }
+
+    return inputPath;
   },
 };
 

@@ -1,214 +1,109 @@
-# BMad Method & BMad Core
+![BMad Method](banner-bmad-method.png)
 
-[![Stable Version](https://img.shields.io/npm/v/bmad-method?color=blue&label=stable)](https://www.npmjs.com/package/bmad-method)
-[![Alpha Version](https://img.shields.io/npm/v/bmad-method/alpha?color=orange&label=alpha)](https://www.npmjs.com/package/bmad-method)
+[![Version](https://img.shields.io/npm/v/bmad-method?color=blue&label=version)](https://www.npmjs.com/package/bmad-method)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289da?logo=discord&logoColor=white)](https://discord.gg/gk8jAdXWmj)
 
-## AI-Driven Agile Development That Scales From Bug Fixes to Enterprise
+**Build More Architect Dreams** — An AI-driven agile development module for the BMad Method Module Ecosystem, the best and most comprehensive Agile AI Driven Development framework that has true scale-adaptive intelligence that adjusts from bug fixes to enterprise systems.
 
-**Build More, Architect Dreams** (BMAD) with **19 specialized AI agents** and **50+ guided workflows** that adapt to your project's complexity—from quick bug fixes to enterprise platforms.
+**100% free and open source.** No paywalls. No gated content. No gated Discord. We believe in empowering everyone, not just those who can pay for a gated community or courses.
 
-> **🚀 v6 is a MASSIVE upgrade from v4!** Complete architectural overhaul, scale-adaptive intelligence, visual workflows, and the powerful BMad Core framework. v4 users: this changes everything. [See what's new →](#whats-new-in-v6)
+## Why the BMad Method?
 
-> **📌 v6 Alpha Status:** Near-beta quality with vastly improved stability. Documentation is being finalized. New videos coming soon to [BMadCode YouTube](https://www.youtube.com/@BMadCode).
+Traditional AI tools do the thinking for you, producing average results. BMad agents and facilitated workflows act as expert collaborators who guide you through a structured process to bring out your best thinking in partnership with the AI.
 
-## 🎯 Why BMad Method?
+- **AI Intelligent Help** — Ask `/bmad-help` anytime for guidance on what's next
+- **Scale-Domain-Adaptive** — Automatically adjusts planning depth based on project complexity
+- **Structured Workflows** — Grounded in agile best practices across analysis, planning, architecture, and implementation
+- **Specialized Agents** — 12+ domain experts (PM, Architect, Developer, UX, Scrum Master, and more)
+- **Party Mode** — Bring multiple agent personas into one session to collaborate and discuss
+- **Complete Lifecycle** — From brainstorming to deployment
 
-Unlike generic AI coding assistants, BMad Method provides **structured, battle-tested workflows** powered by specialized agents who understand agile development. Each agent has deep domain expertise—from product management to architecture to testing—working together seamlessly.
-
-**✨ Key Benefits:**
-
-- **Scale-Adaptive Intelligence** - Automatically adjusts planning depth from bug fixes to enterprise systems
-- **Complete Development Lifecycle** - Analysis → Planning → Architecture → Implementation
-- **Specialized Expertise** - 19 agents with specific roles (PM, Architect, Developer, UX Designer, etc.)
-- **Proven Methodologies** - Built on agile best practices with AI amplification
-- **IDE Integration** - Works with Claude Code, Cursor, Windsurf, VS Code
-
-## 🏗️ The Power of BMad Core
-
-**BMad Method** is actually a sophisticated module built on top of **BMad Core** (**C**ollaboration **O**ptimized **R**eflection **E**ngine). This revolutionary architecture means:
-
-- **BMad Core** provides the universal framework for human-AI collaboration
-- **BMad Method** leverages Core to deliver agile development workflows
-- **BMad Builder** lets YOU create custom modules as powerful as BMad Method itself
-
-With **BMad Builder**, you can architect both simple agents and vastly complex domain-specific modules (legal, medical, finance, education, creative) that will soon be sharable in an **official community marketplace**. Imagine building and sharing your own specialized AI team!
-
-## 📊 See It In Action
-
-<p align="center">
-  <img src="./src/modules/bmm/docs/images/workflow-method-greenfield.svg" alt="BMad Method Workflow" width="100%">
-</p>
-
-<p align="center">
-  <em>Complete BMad Method workflow showing all phases, agents, and decision points</em>
-</p>
-
-## 🚀 Get Started in 3 Steps
-
-### 1. Install BMad Method
-
-```bash
-# Install v6 Alpha (recommended)
-npx bmad-method@alpha install
-
-# Or stable v4 for production
-npx bmad-method install
-```
-
-### 2. Initialize Your Project
-
-Load any agent in your IDE and run:
-
-```
-*workflow-init
-```
-
-This analyzes your project and recommends the right workflow track.
-
-### 3. Choose Your Track
-
-BMad Method adapts to your needs with three intelligent tracks:
-
-| Track              | Use For                   | Planning                | Time to Start |
-| ------------------ | ------------------------- | ----------------------- | ------------- |
-| **⚡ Quick Flow**  | Bug fixes, small features | Tech spec only          | < 5 minutes   |
-| **📋 BMad Method** | Products, platforms       | PRD + Architecture + UX | < 15 minutes  |
-| **🏢 Enterprise**  | Compliance, scale         | Full governance suite   | < 30 minutes  |
-
-> **Not sure?** Run `*workflow-init` and let BMad analyze your project goal.
-
-## 🔄 How It Works: 4-Phase Methodology
-
-BMad Method guides you through a proven development lifecycle:
-
-1. **📊 Analysis** (Optional) - Brainstorm, research, and explore solutions
-2. **📝 Planning** - Create PRDs, tech specs, or game design documents
-3. **🏗️ Solutioning** - Design architecture, UX, and technical approach
-4. **⚡ Implementation** - Story-driven development with continuous validation
-
-Each phase has specialized workflows and agents working together to deliver exceptional results.
-
-## 🤖 Meet Your Team
-
-**12 Specialized Agents** working in concert:
-
-| Development | Architecture   | Product       | Leadership     |
-| ----------- | -------------- | ------------- | -------------- |
-| Developer   | Architect      | PM            | Scrum Master   |
-| UX Designer | Test Architect | Analyst       | BMad Master    |
-| Tech Writer | Game Architect | Game Designer | Game Developer |
-
-**Test Architect** integrates with `@seontechnologies/playwright-utils` for production-ready fixture-based utilities.
-
-Each agent brings deep expertise and can be customized to match your team's style.
-
-## 📦 What's Included
-
-### Core Modules
-
-- **BMad Method (BMM)** - Complete agile development framework
-  - 12 specialized agents
-  - 34 workflows across 4 phases
-  - Scale-adaptive planning
-  - [→ Documentation Hub](./src/modules/bmm/docs/README.md)
-
-- **BMad Builder (BMB)** - Create custom agents and workflows
-  - Build anything from simple agents to complex modules
-  - Create domain-specific solutions (legal, medical, finance, education)
-  - Share your creations in the upcoming community marketplace
-  - [→ Builder Guide](./src/modules/bmb/README.md)
-
-- **Creative Intelligence Suite (CIS)** - Innovation & problem-solving
-  - Brainstorming, design thinking, storytelling
-  - 5 creative facilitation workflows
-  - [→ Creative Workflows](./src/modules/cis/README.md)
-
-### Key Features
-
-- **🎨 Customizable Agents** - Modify personalities, expertise, and communication styles
-- **🌐 Multi-Language Support** - Separate settings for communication and code output
-- **📄 Document Sharding** - 90% token savings for large projects
-- **🔄 Update-Safe** - Your customizations persist through updates
-- **🚀 Web Bundles** - Use in ChatGPT, Claude Projects, or Gemini Gems
-
-## 📚 Documentation
-
-### Quick Links
-
-- **[Quick Start Guide](./src/modules/bmm/docs/quick-start.md)** - 15-minute introduction
-- **[Complete BMM Documentation](./src/modules/bmm/docs/README.md)** - All guides and references
-- **[Agent Customization](./docs/agent-customization-guide.md)** - Personalize your agents
-- **[All Documentation](./docs/index.md)** - Complete documentation index
-
-### For v4 Users
-
-- **[v4 Documentation](https://github.com/bmad-code-org/BMAD-METHOD/tree/V4)**
-- **[v4 to v6 Upgrade Guide](./docs/v4-to-v6-upgrade.md)**
-
-## 💬 Community & Support
-
-- **[Discord Community](https://discord.gg/gk8jAdXWmj)** - Get help, share projects
-- **[GitHub Issues](https://github.com/bmad-code-org/BMAD-METHOD/issues)** - Report bugs, request features
-- **[YouTube Channel](https://www.youtube.com/@BMadCode)** - Video tutorials and demos
-- **[Web Bundles](https://bmad-code-org.github.io/bmad-bundles/)** - Pre-built agent bundles
-
-## 🛠️ Development
-
-For contributors working on the BMad codebase:
-
-```bash
-# Run all quality checks
-npm test
-
-# Development commands
-npm run lint:fix      # Fix code style
-npm run format:fix    # Auto-format code
-npm run bundle        # Build web bundles
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for full development guidelines.
-
-## What's New in v6
-
-**v6 represents a complete architectural revolution from v4:**
-
-### 🚀 Major Upgrades
-
-- **BMad Core Framework** - Modular architecture enabling custom domain solutions
-- **Scale-Adaptive Intelligence** - Automatic adjustment from bug fixes to enterprise
-- **Visual Workflows** - Beautiful SVG diagrams showing complete methodology
-- **BMad Builder Module** - Create and share your own AI agent teams
-- **50+ Workflows** - Up from 20 in v4, covering every development scenario
-- **19 Specialized Agents** - Enhanced with customizable personalities and expertise
-- **Update-Safe Customization** - Your configs persist through all updates
-- **Web Bundles** - Use agents in ChatGPT, Claude, and Gemini
-- **Multi-Language Support** - Separate settings for communication and code
-- **Document Sharding** - 90% token savings for large projects
-
-### 🔄 For v4 Users
-
-- **[Comprehensive Upgrade Guide](./docs/v4-to-v6-upgrade.md)** - Step-by-step migration
-- **[v4 Documentation Archive](https://github.com/bmad-code-org/BMAD-METHOD/tree/V4)** - Legacy reference
-- Backwards compatibility where possible
-- Smooth migration path with installer detection
-
-## 📄 License
-
-MIT License - See [LICENSE](LICENSE) for details.
-
-**Trademarks:** BMAD™ and BMAD-METHOD™ are trademarks of BMad Code, LLC.
+[Learn more at **docs.bmad-method.org**](https://docs.bmad-method.org)
 
 ---
 
-<p align="center">
-  <a href="https://github.com/bmad-code-org/BMAD-METHOD/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=bmad-code-org/BMAD-METHOD" alt="Contributors">
-  </a>
-</p>
+## 🚀 What's Next for BMad?
 
-<p align="center">
-  <sub>Built with ❤️ for the human-AI collaboration community</sub>
-</p>
+**V6 is here and we're just getting started!** The BMad Method is evolving rapidly with optimizations including Cross Platform Agent Team and Sub Agent inclusion, Skills Architecture, BMad Builder v1, Dev Loop Automation, and so much more in the works.
+
+**[📍 Check out the complete Roadmap →](https://docs.bmad-method.org/roadmap/)**
+
+---
+
+## Quick Start
+
+**Prerequisites**: [Node.js](https://nodejs.org) v20+
+
+```bash
+npx bmad-method install
+```
+
+> If you are getting a stale beta version, use: `npx bmad-method@6.0.1 install`
+
+Follow the installer prompts, then open your AI IDE (Claude Code, Cursor, etc.) in your project folder.
+
+**Non-Interactive Installation** (for CI/CD):
+
+```bash
+npx bmad-method install --directory /path/to/project --modules bmm --tools claude-code --yes
+```
+
+[See all installation options](https://docs.bmad-method.org/how-to/non-interactive-installation/)
+
+> **Not sure what to do?** Run `/bmad-help` — it tells you exactly what's next and what's optional. You can also ask questions like `/bmad-help I just finished the architecture, what do I do next?`
+
+## Modules
+
+BMad Method extends with official modules for specialized domains. Available during installation or anytime after.
+
+| Module                                                                                                            | Purpose                                           |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| **[BMad Method (BMM)](https://github.com/bmad-code-org/BMAD-METHOD)**                                             | Core framework with 34+ workflows                 |
+| **[BMad Builder (BMB)](https://github.com/bmad-code-org/bmad-builder)**                                           | Create custom BMad agents and workflows           |
+| **[Test Architect (TEA)](https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise)**             | Risk-based test strategy and automation           |
+| **[Game Dev Studio (BMGD)](https://github.com/bmad-code-org/bmad-module-game-dev-studio)**                        | Game development workflows (Unity, Unreal, Godot) |
+| **[Creative Intelligence Suite (CIS)](https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite)** | Innovation, brainstorming, design thinking        |
+
+## Documentation
+
+[BMad Method Docs Site](https://docs.bmad-method.org) — Tutorials, guides, concepts, and reference
+
+**Quick links:**
+- [Getting Started Tutorial](https://docs.bmad-method.org/tutorials/getting-started/)
+- [Upgrading from Previous Versions](https://docs.bmad-method.org/how-to/upgrade-to-v6/)
+- [Test Architect Documentation](https://bmad-code-org.github.io/bmad-method-test-architecture-enterprise/)
+
+
+## Community
+
+- [Discord](https://discord.gg/gk8jAdXWmj) — Get help, share ideas, collaborate
+- [Subscribe on YouTube](https://www.youtube.com/@BMadCode) — Tutorials, master class, and podcast (launching Feb 2025)
+- [GitHub Issues](https://github.com/bmad-code-org/BMAD-METHOD/issues) — Bug reports and feature requests
+- [Discussions](https://github.com/bmad-code-org/BMAD-METHOD/discussions) — Community conversations
+
+## Support BMad
+
+BMad is free for everyone — and always will be. If you'd like to support development:
+
+- ⭐ Please click the star project icon near the top right of this page
+- ☕ [Buy Me a Coffee](https://buymeacoffee.com/bmad) — Fuel the development
+- 🏢 Corporate sponsorship — DM on Discord
+- 🎤 Speaking & Media — Available for conferences, podcasts, interviews (BM on Discord)
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+**BMad** and **BMAD-METHOD** are trademarks of BMad Code, LLC. See [TRADEMARK.md](TRADEMARK.md) for details.
+
+[![Contributors](https://contrib.rocks/image?repo=bmad-code-org/BMAD-METHOD)](https://github.com/bmad-code-org/BMAD-METHOD/graphs/contributors)
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for contributor information.

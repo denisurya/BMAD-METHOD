@@ -1,21 +1,33 @@
 const path = require('node:path');
 const fs = require('fs-extra');
-const yaml = require('js-yaml');
-const chalk = require('chalk');
-const inquirer = require('inquirer');
+const yaml = require('yaml');
 const { getProjectRoot, getModulePath } = require('../../../lib/project-root');
 const { CLIUtils } = require('../../../lib/cli-utils');
+const prompts = require('../../../lib/prompts');
 
 class ConfigCollector {
   constructor() {
     this.collectedConfig = {};
     this.existingConfig = null;
     this.currentProjectDir = null;
+    this._moduleManagerInstance = null;
+  }
+
+  /**
+   * Get or create a cached ModuleManager instance (lazy initialization)
+   * @returns {Object} ModuleManager instance
+   */
+  _getModuleManager() {
+    if (!this._moduleManagerInstance) {
+      const { ModuleManager } = require('../modules/manager');
+      this._moduleManagerInstance = new ModuleManager();
+    }
+    return this._moduleManagerInstance;
   }
 
   /**
    * Find the bmad installation directory in a project
-   * V6+ installations can use ANY folder name but ALWAYS have _cfg/manifest.yaml
+   * V6+ installations can use ANY folder name but ALWAYS have _config/manifest.yaml
    * @param {string} projectDir - Project directory
    * @returns {Promise<string>} Path to bmad directory
    */
@@ -26,13 +38,13 @@ class ConfigCollector {
       return path.join(projectDir, 'bmad');
     }
 
-    // V6+ strategy: Look for ANY directory with _cfg/manifest.yaml
+    // V6+ strategy: Look for ANY directory with _config/manifest.yaml
     // This is the definitive marker of a V6+ installation
     try {
       const entries = await fs.readdir(projectDir, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.isDirectory()) {
-          const manifestPath = path.join(projectDir, entry.name, '_cfg', 'manifest.yaml');
+          const manifestPath = path.join(projectDir, entry.name, '_config', 'manifest.yaml');
           if (await fs.pathExists(manifestPath)) {
             // Found a V6+ installation
             return path.join(projectDir, entry.name);
@@ -59,12 +71,12 @@ class ConfigCollector {
       return null;
     }
 
-    // Look for ANY directory with _cfg/manifest.yaml
+    // Look for ANY directory with _config/manifest.yaml
     try {
       const entries = await fs.readdir(projectDir, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.isDirectory()) {
-          const manifestPath = path.join(projectDir, entry.name, '_cfg', 'manifest.yaml');
+          const manifestPath = path.join(projectDir, entry.name, '_config', 'manifest.yaml');
           if (await fs.pathExists(manifestPath)) {
             // Found a V6+ installation, return just the folder name
             return entry.name;
@@ -105,11 +117,17 @@ class ConfigCollector {
 
     for (const entry of entries) {
       if (entry.isDirectory()) {
+        // Skip the _config directory - it's for system use
+        if (entry.name === '_config' || entry.name === '_memory') {
+          continue;
+        }
+
         const moduleConfigPath = path.join(bmadDir, entry.name, 'config.yaml');
+
         if (await fs.pathExists(moduleConfigPath)) {
           try {
             const content = await fs.readFile(moduleConfigPath, 'utf8');
-            const moduleConfig = yaml.load(content);
+            const moduleConfig = yaml.parse(content);
             if (moduleConfig) {
               this.existingConfig[entry.name] = moduleConfig;
               foundAny = true;
@@ -121,19 +139,86 @@ class ConfigCollector {
       }
     }
 
-    if (foundAny) {
-      console.log(chalk.cyan('\n📋 Found existing BMAD module configurations'));
+    return foundAny;
+  }
+
+  /**
+   * Pre-scan module schemas to gather metadata for the configuration gateway prompt.
+   * Returns info about which modules have configurable options.
+   * @param {Array} modules - List of non-core module names
+   * @returns {Promise<Array>} Array of {moduleName, displayName, questionCount, hasFieldsWithoutDefaults}
+   */
+  async scanModuleSchemas(modules) {
+    const metadataFields = new Set(['code', 'name', 'header', 'subheader', 'default_selected']);
+    const results = [];
+
+    for (const moduleName of modules) {
+      // Resolve module.yaml path - custom paths first, then standard location, then ModuleManager search
+      let moduleConfigPath = null;
+      const customPath = this.customModulePaths?.get(moduleName);
+      if (customPath) {
+        moduleConfigPath = path.join(customPath, 'module.yaml');
+      } else {
+        const standardPath = path.join(getModulePath(moduleName), 'module.yaml');
+        if (await fs.pathExists(standardPath)) {
+          moduleConfigPath = standardPath;
+        } else {
+          const moduleSourcePath = await this._getModuleManager().findModuleSource(moduleName, { silent: true });
+          if (moduleSourcePath) {
+            moduleConfigPath = path.join(moduleSourcePath, 'module.yaml');
+          }
+        }
+      }
+
+      if (!moduleConfigPath || !(await fs.pathExists(moduleConfigPath))) {
+        continue;
+      }
+
+      try {
+        const content = await fs.readFile(moduleConfigPath, 'utf8');
+        const moduleConfig = yaml.parse(content);
+        if (!moduleConfig) continue;
+
+        const displayName = moduleConfig.header || `${moduleName.toUpperCase()} Module`;
+        const configKeys = Object.keys(moduleConfig).filter((key) => key !== 'prompt');
+        const questionKeys = configKeys.filter((key) => {
+          if (metadataFields.has(key)) return false;
+          const item = moduleConfig[key];
+          return item && typeof item === 'object' && item.prompt;
+        });
+
+        const hasFieldsWithoutDefaults = questionKeys.some((key) => {
+          const item = moduleConfig[key];
+          return item.default === undefined || item.default === null || item.default === '';
+        });
+
+        results.push({
+          moduleName,
+          displayName,
+          questionCount: questionKeys.length,
+          hasFieldsWithoutDefaults,
+        });
+      } catch (error) {
+        await prompts.log.warn(`Could not read schema for module "${moduleName}": ${error.message}`);
+      }
     }
 
-    return foundAny;
+    return results;
   }
 
   /**
    * Collect configuration for all modules
    * @param {Array} modules - List of modules to configure (including 'core')
    * @param {string} projectDir - Target project directory
+   * @param {Object} options - Additional options
+   * @param {Map} options.customModulePaths - Map of module ID to source path for custom modules
+   * @param {boolean} options.skipPrompts - Skip prompts and use defaults (for --yes flag)
    */
-  async collectAllConfigurations(modules, projectDir) {
+  async collectAllConfigurations(modules, projectDir, options = {}) {
+    // Store custom module paths for use in collectModuleConfig
+    this.customModulePaths = options.customModulePaths || new Map();
+    this.skipPrompts = options.skipPrompts || false;
+    this.modulesToCustomize = undefined;
     await this.loadExistingConfig(projectDir);
 
     // Check if core was already collected (e.g., in early collection phase)
@@ -147,8 +232,100 @@ class ConfigCollector {
       this.allAnswers = {};
     }
 
-    for (const moduleName of allModules) {
+    // Split processing: core first, then gateway, then remaining modules
+    const coreModules = allModules.filter((m) => m === 'core');
+    const nonCoreModules = allModules.filter((m) => m !== 'core');
+
+    // Collect core config first (always fully prompted)
+    for (const moduleName of coreModules) {
       await this.collectModuleConfig(moduleName, projectDir);
+    }
+
+    // Show batch configuration gateway for non-core modules
+    // Scan all non-core module schemas for display names and config metadata
+    let scannedModules = [];
+    if (!this.skipPrompts && nonCoreModules.length > 0) {
+      scannedModules = await this.scanModuleSchemas(nonCoreModules);
+      const customizableModules = scannedModules.filter((m) => m.questionCount > 0);
+
+      if (customizableModules.length > 0) {
+        const configMode = await prompts.select({
+          message: 'Module configuration',
+          choices: [
+            { name: 'Express Setup', value: 'express', hint: 'accept all defaults (recommended)' },
+            { name: 'Customize', value: 'customize', hint: 'choose modules to configure' },
+          ],
+          default: 'express',
+        });
+
+        if (configMode === 'customize') {
+          const choices = customizableModules.map((m) => ({
+            name: `${m.displayName} (${m.questionCount} option${m.questionCount === 1 ? '' : 's'})`,
+            value: m.moduleName,
+            hint: m.hasFieldsWithoutDefaults ? 'has fields without defaults' : undefined,
+            checked: m.hasFieldsWithoutDefaults,
+          }));
+          const selected = await prompts.multiselect({
+            message: 'Select modules to customize:',
+            choices,
+            required: false,
+          });
+          this.modulesToCustomize = new Set(selected);
+        } else {
+          // Express mode: no modules to customize
+          this.modulesToCustomize = new Set();
+        }
+      } else {
+        // All non-core modules have zero config - no gateway needed
+        this.modulesToCustomize = new Set();
+      }
+    }
+
+    // Collect remaining non-core modules
+    if (this.modulesToCustomize === undefined) {
+      // No gateway was shown (skipPrompts, no non-core modules, or direct call) - process all normally
+      for (const moduleName of nonCoreModules) {
+        await this.collectModuleConfig(moduleName, projectDir);
+      }
+    } else {
+      // Split into default modules (tasks progress) and customized modules (interactive)
+      const defaultModules = nonCoreModules.filter((m) => !this.modulesToCustomize.has(m));
+      const customizeModules = nonCoreModules.filter((m) => this.modulesToCustomize.has(m));
+
+      // Run default modules with a single spinner
+      if (defaultModules.length > 0) {
+        // Build display name map from all scanned modules for pre-call spinner messages
+        const displayNameMap = new Map();
+        for (const m of scannedModules) {
+          displayNameMap.set(m.moduleName, m.displayName);
+        }
+
+        const configSpinner = await prompts.spinner();
+        configSpinner.start('Configuring modules...');
+        try {
+          for (const moduleName of defaultModules) {
+            const displayName = displayNameMap.get(moduleName) || moduleName.toUpperCase();
+            configSpinner.message(`Configuring ${displayName}...`);
+            try {
+              this._silentConfig = true;
+              await this.collectModuleConfig(moduleName, projectDir);
+            } finally {
+              this._silentConfig = false;
+            }
+          }
+        } finally {
+          configSpinner.stop(customizeModules.length > 0 ? 'Module defaults applied' : 'Module configuration complete');
+        }
+      }
+
+      // Run customized modules individually (may show interactive prompts)
+      for (const moduleName of customizeModules) {
+        await this.collectModuleConfig(moduleName, projectDir);
+      }
+
+      if (customizeModules.length > 0) {
+        await prompts.log.step('Module configuration complete');
+      }
     }
 
     // Add metadata
@@ -181,16 +358,38 @@ class ConfigCollector {
       this.allAnswers = {};
     }
 
-    // Load module's install config schema
-    const installerConfigPath = path.join(getModulePath(moduleName), '_module-installer', 'install-config.yaml');
-    const legacyConfigPath = path.join(getModulePath(moduleName), 'config.yaml');
+    // Load module's config schema from module.yaml
+    // First, try the standard src/modules location
+    let moduleConfigPath = path.join(getModulePath(moduleName), 'module.yaml');
+
+    // If not found in src/modules, we need to find it by searching the project
+    if (!(await fs.pathExists(moduleConfigPath))) {
+      const moduleSourcePath = await this._getModuleManager().findModuleSource(moduleName, { silent: true });
+
+      if (moduleSourcePath) {
+        moduleConfigPath = path.join(moduleSourcePath, 'module.yaml');
+      }
+    }
 
     let configPath = null;
-    if (await fs.pathExists(installerConfigPath)) {
-      configPath = installerConfigPath;
-    } else if (await fs.pathExists(legacyConfigPath)) {
-      configPath = legacyConfigPath;
+    let isCustomModule = false;
+
+    if (await fs.pathExists(moduleConfigPath)) {
+      configPath = moduleConfigPath;
     } else {
+      // Check if this is a custom module with custom.yaml
+      const moduleSourcePath = await this._getModuleManager().findModuleSource(moduleName, { silent: true });
+
+      if (moduleSourcePath) {
+        const rootCustomConfigPath = path.join(moduleSourcePath, 'custom.yaml');
+
+        if (await fs.pathExists(rootCustomConfigPath)) {
+          isCustomModule = true;
+          // For custom modules, we don't have an install-config schema, so just use existing values
+          // The custom.yaml values will be loaded and merged during installation
+        }
+      }
+
       // No config schema for this module - use existing values
       if (this.existingConfig && this.existingConfig[moduleName]) {
         if (!this.collectedConfig[moduleName]) {
@@ -202,7 +401,7 @@ class ConfigCollector {
     }
 
     const configContent = await fs.readFile(configPath, 'utf8');
-    const moduleConfig = yaml.load(configContent);
+    const moduleConfig = yaml.parse(configContent);
 
     if (!moduleConfig) {
       return false;
@@ -212,33 +411,80 @@ class ConfigCollector {
     const configKeys = Object.keys(moduleConfig).filter((key) => key !== 'prompt');
     const existingKeys = this.existingConfig && this.existingConfig[moduleName] ? Object.keys(this.existingConfig[moduleName]) : [];
 
+    // Check if this module has no configuration keys at all (like CIS)
+    // Filter out metadata fields and only count actual config objects
+    const metadataFields = new Set(['code', 'name', 'header', 'subheader', 'default_selected']);
+    const actualConfigKeys = configKeys.filter((key) => !metadataFields.has(key));
+    const hasNoConfig = actualConfigKeys.length === 0;
+
+    // If module has no config keys at all, handle it specially
+    if (hasNoConfig && moduleConfig.subheader) {
+      const moduleDisplayName = moduleConfig.header || `${moduleName.toUpperCase()} Module`;
+      await prompts.log.step(moduleDisplayName);
+      await prompts.log.message(`  \u2713 ${moduleConfig.subheader}`);
+      return false; // No new fields
+    }
+
+    // Find new interactive fields (with prompt)
     const newKeys = configKeys.filter((key) => {
       const item = moduleConfig[key];
       // Check if it's a config item and doesn't exist in existing config
       return item && typeof item === 'object' && item.prompt && !existingKeys.includes(key);
     });
 
-    // If in silent mode and no new keys, use existing config and skip prompts
-    if (silentMode && newKeys.length === 0) {
+    // Find new static fields (without prompt, just result)
+    const newStaticKeys = configKeys.filter((key) => {
+      const item = moduleConfig[key];
+      return item && typeof item === 'object' && !item.prompt && item.result && !existingKeys.includes(key);
+    });
+
+    // If in silent mode and no new keys (neither interactive nor static), use existing config and skip prompts
+    if (silentMode && newKeys.length === 0 && newStaticKeys.length === 0) {
       if (this.existingConfig && this.existingConfig[moduleName]) {
         if (!this.collectedConfig[moduleName]) {
           this.collectedConfig[moduleName] = {};
         }
         this.collectedConfig[moduleName] = { ...this.existingConfig[moduleName] };
 
+        // Special handling for user_name: ensure it has a value
+        if (
+          moduleName === 'core' &&
+          (!this.collectedConfig[moduleName].user_name || this.collectedConfig[moduleName].user_name === '[USER_NAME]')
+        ) {
+          this.collectedConfig[moduleName].user_name = this.getDefaultUsername();
+        }
+
         // Also populate allAnswers for cross-referencing
         for (const [key, value] of Object.entries(this.existingConfig[moduleName])) {
-          this.allAnswers[`${moduleName}_${key}`] = value;
+          // Ensure user_name is properly set in allAnswers too
+          let finalValue = value;
+          if (moduleName === 'core' && key === 'user_name' && (!value || value === '[USER_NAME]')) {
+            finalValue = this.getDefaultUsername();
+          }
+          this.allAnswers[`${moduleName}_${key}`] = finalValue;
+        }
+      } else if (moduleName === 'core') {
+        // No existing core config - ensure we at least have user_name
+        if (!this.collectedConfig[moduleName]) {
+          this.collectedConfig[moduleName] = {};
+        }
+        if (!this.collectedConfig[moduleName].user_name) {
+          this.collectedConfig[moduleName].user_name = this.getDefaultUsername();
+          this.allAnswers[`${moduleName}_user_name`] = this.getDefaultUsername();
         }
       }
-      // Show "no config" message for modules with no new questions
-      CLIUtils.displayModuleNoConfig(moduleName, moduleConfig.header, moduleConfig.subheader);
+
+      // Show "no config" message for modules with no new questions (that have config keys)
+      await prompts.log.message(`  \u2713 ${moduleName.toUpperCase()} module already up to date`);
       return false; // No new fields
     }
 
-    // If we have new fields, build questions first
-    if (newKeys.length > 0) {
+    // If we have new fields (interactive or static), process them
+    if (newKeys.length > 0 || newStaticKeys.length > 0) {
       const questions = [];
+      const staticAnswers = {};
+
+      // Build questions for interactive fields
       for (const key of newKeys) {
         const item = moduleConfig[key];
         const question = await this.buildQuestion(moduleName, key, item, moduleConfig);
@@ -247,38 +493,54 @@ class ConfigCollector {
         }
       }
 
+      // Prepare static answers (no prompt, just result)
+      for (const key of newStaticKeys) {
+        staticAnswers[`${moduleName}_${key}`] = undefined;
+      }
+
+      // Collect all answers (static + prompted)
+      let allAnswers = { ...staticAnswers };
+
       if (questions.length > 0) {
         // Only show header if we actually have questions
-        CLIUtils.displayModuleConfigHeader(moduleName, moduleConfig.header, moduleConfig.subheader);
-        console.log(); // Line break before questions
-        const answers = await inquirer.prompt(questions);
+        await CLIUtils.displayModuleConfigHeader(moduleName, moduleConfig.header, moduleConfig.subheader);
+        await prompts.log.message('');
+        const promptedAnswers = await prompts.prompt(questions);
 
-        // Store answers for cross-referencing
-        Object.assign(this.allAnswers, answers);
+        // Merge prompted answers with static answers
+        Object.assign(allAnswers, promptedAnswers);
+      } else if (newStaticKeys.length > 0) {
+        // Only static fields, no questions - show no config message
+        await prompts.log.message(`  \u2713 ${moduleName.toUpperCase()} module configuration updated`);
+      }
 
-        // Process answers and build result values
-        for (const key of Object.keys(answers)) {
-          const originalKey = key.replace(`${moduleName}_`, '');
-          const item = moduleConfig[originalKey];
-          const value = answers[key];
+      // Store all answers for cross-referencing
+      Object.assign(this.allAnswers, allAnswers);
 
-          let result;
-          if (Array.isArray(value)) {
-            result = value;
-          } else if (item.result) {
-            result = this.processResultTemplate(item.result, value);
-          } else {
-            result = value;
-          }
-
-          if (!this.collectedConfig[moduleName]) {
-            this.collectedConfig[moduleName] = {};
-          }
-          this.collectedConfig[moduleName][originalKey] = result;
-        }
+      // Process all answers (both static and prompted)
+      // First, copy existing config to preserve values that aren't being updated
+      if (this.existingConfig && this.existingConfig[moduleName]) {
+        this.collectedConfig[moduleName] = { ...this.existingConfig[moduleName] };
       } else {
-        // New keys exist but no questions generated - show no config message
-        CLIUtils.displayModuleNoConfig(moduleName, moduleConfig.header, moduleConfig.subheader);
+        this.collectedConfig[moduleName] = {};
+      }
+
+      for (const key of Object.keys(allAnswers)) {
+        const originalKey = key.replace(`${moduleName}_`, '');
+        const item = moduleConfig[originalKey];
+        const value = allAnswers[key];
+
+        let result;
+        if (Array.isArray(value)) {
+          result = value;
+        } else if (item.result) {
+          result = this.processResultTemplate(item.result, value);
+        } else {
+          result = value;
+        }
+
+        // Update the collected config with new/updated values
+        this.collectedConfig[moduleName][originalKey] = result;
       }
     }
 
@@ -295,7 +557,9 @@ class ConfigCollector {
       }
     }
 
-    return newKeys.length > 0; // Return true if we prompted for new fields
+    await this.displayModulePostConfigNotes(moduleName, moduleConfig);
+
+    return newKeys.length > 0 || newStaticKeys.length > 0; // Return true if we had any new fields (interactive or static)
   }
 
   /**
@@ -396,22 +660,37 @@ class ConfigCollector {
     if (!this.allAnswers) {
       this.allAnswers = {};
     }
-    // Load module's config.yaml (check new location first, then fallback)
-    const installerConfigPath = path.join(getModulePath(moduleName), '_module-installer', 'install-config.yaml');
-    const legacyConfigPath = path.join(getModulePath(moduleName), 'config.yaml');
+    // Load module's config
+    // First, check if we have a custom module path for this module
+    let moduleConfigPath = null;
+
+    if (this.customModulePaths && this.customModulePaths.has(moduleName)) {
+      const customPath = this.customModulePaths.get(moduleName);
+      moduleConfigPath = path.join(customPath, 'module.yaml');
+    } else {
+      // Try the standard src/modules location
+      moduleConfigPath = path.join(getModulePath(moduleName), 'module.yaml');
+    }
+
+    // If not found in src/modules or custom paths, search the project
+    if (!(await fs.pathExists(moduleConfigPath))) {
+      const moduleSourcePath = await this._getModuleManager().findModuleSource(moduleName, { silent: true });
+
+      if (moduleSourcePath) {
+        moduleConfigPath = path.join(moduleSourcePath, 'module.yaml');
+      }
+    }
 
     let configPath = null;
-    if (await fs.pathExists(installerConfigPath)) {
-      configPath = installerConfigPath;
-    } else if (await fs.pathExists(legacyConfigPath)) {
-      configPath = legacyConfigPath;
+    if (await fs.pathExists(moduleConfigPath)) {
+      configPath = moduleConfigPath;
     } else {
       // No config for this module
       return;
     }
 
     const configContent = await fs.readFile(configPath, 'utf8');
-    const moduleConfig = yaml.load(configContent);
+    const moduleConfig = yaml.parse(configContent);
 
     if (!moduleConfig) {
       return;
@@ -419,30 +698,104 @@ class ConfigCollector {
 
     // Process each config item
     const questions = [];
+    const staticAnswers = {};
     const configKeys = Object.keys(moduleConfig).filter((key) => key !== 'prompt');
 
     for (const key of configKeys) {
       const item = moduleConfig[key];
 
       // Skip if not a config object
-      if (!item || typeof item !== 'object' || !item.prompt) {
+      if (!item || typeof item !== 'object') {
         continue;
       }
 
-      const question = await this.buildQuestion(moduleName, key, item, moduleConfig);
-      if (question) {
-        questions.push(question);
+      // Handle static values (no prompt, just result)
+      if (!item.prompt && item.result) {
+        // Add to static answers with a marker value
+        staticAnswers[`${moduleName}_${key}`] = undefined;
+        continue;
+      }
+
+      // Handle interactive values (with prompt)
+      if (item.prompt) {
+        const question = await this.buildQuestion(moduleName, key, item, moduleConfig);
+        if (question) {
+          questions.push(question);
+        }
       }
     }
 
-    // Display appropriate header based on whether there are questions
-    if (questions.length > 0) {
-      CLIUtils.displayModuleConfigHeader(moduleName, moduleConfig.header, moduleConfig.subheader);
-      console.log(); // Line break before questions
-      const answers = await inquirer.prompt(questions);
+    // Collect all answers (static + prompted)
+    let allAnswers = { ...staticAnswers };
 
-      // Store answers for cross-referencing
-      Object.assign(this.allAnswers, answers);
+    // If there are questions to ask, prompt for accepting defaults vs customizing
+    if (questions.length > 0) {
+      const moduleDisplayName = moduleConfig.header || `${moduleName.toUpperCase()} Module`;
+
+      // Skip prompts mode: use all defaults without asking
+      if (this.skipPrompts) {
+        await prompts.log.info(`Using default configuration for ${moduleDisplayName}`);
+        // Use defaults for all questions
+        for (const question of questions) {
+          const hasDefault = question.default !== undefined && question.default !== null && question.default !== '';
+          if (hasDefault && typeof question.default !== 'function') {
+            allAnswers[question.name] = question.default;
+          }
+        }
+      } else {
+        if (!this._silentConfig) await prompts.log.step(`Configuring ${moduleDisplayName}`);
+        let useDefaults = true;
+        if (moduleName === 'core') {
+          useDefaults = false; // Core: always show all questions
+        } else if (this.modulesToCustomize === undefined) {
+          // Fallback: original per-module confirm (backward compat for direct calls)
+          const customizeAnswer = await prompts.prompt([
+            {
+              type: 'confirm',
+              name: 'customize',
+              message: 'Accept Defaults (no to customize)?',
+              default: true,
+            },
+          ]);
+          useDefaults = customizeAnswer.customize;
+        } else {
+          // Batch mode: use defaults unless module was selected for customization
+          useDefaults = !this.modulesToCustomize.has(moduleName);
+        }
+
+        if (useDefaults && moduleName !== 'core') {
+          // Accept defaults - only ask questions that have NO default value
+          const questionsWithoutDefaults = questions.filter((q) => q.default === undefined || q.default === null || q.default === '');
+
+          if (questionsWithoutDefaults.length > 0) {
+            await prompts.log.message(`  Asking required questions for ${moduleName.toUpperCase()}...`);
+            const promptedAnswers = await prompts.prompt(questionsWithoutDefaults);
+            Object.assign(allAnswers, promptedAnswers);
+          }
+
+          // For questions with defaults that weren't asked, we need to process them with their default values
+          const questionsWithDefaults = questions.filter((q) => q.default !== undefined && q.default !== null && q.default !== '');
+          for (const question of questionsWithDefaults) {
+            // Skip function defaults - these are dynamic and will be evaluated later
+            if (typeof question.default === 'function') {
+              continue;
+            }
+            allAnswers[question.name] = question.default;
+          }
+        } else {
+          const promptedAnswers = await prompts.prompt(questions);
+          Object.assign(allAnswers, promptedAnswers);
+        }
+      }
+    }
+
+    // Store all answers for cross-referencing
+    Object.assign(this.allAnswers, allAnswers);
+
+    // Process all answers (both static and prompted)
+    // Always process if we have any answers or static answers
+    if (Object.keys(allAnswers).length > 0 || Object.keys(staticAnswers).length > 0) {
+      const answers = allAnswers;
 
       // Process answers and build result values
       for (const key of Object.keys(answers)) {
@@ -455,8 +808,6 @@ class ConfigCollector {
 
         // For arrays (multi-select), handle differently
         if (Array.isArray(value)) {
-          // If there's a result template and it's a string, don't use it for arrays
-          // Just use the array value directly
           result = value;
         } else if (item.result) {
           result = item.result;
@@ -471,11 +822,9 @@ class ConfigCollector {
               if (result === '{value}') {
                 result = value;
               } else {
-                // Otherwise replace in the string
                 result = result.replace('{value}', value);
               }
             } else {
-              // For non-string values, use directly
               result = value;
             }
 
@@ -513,10 +862,6 @@ class ConfigCollector {
                   for (const mod of Object.keys(this.collectedConfig)) {
                     if (mod !== '_meta' && this.collectedConfig[mod] && this.collectedConfig[mod][configKey]) {
                       configValue = this.collectedConfig[mod][configKey];
-                      // Extract just the value part if it's a result template
-                      if (typeof configValue === 'string' && configValue.includes('{project-root}/')) {
-                        configValue = configValue.replace('{project-root}/', '');
-                      }
                       break;
                     }
                   }
@@ -527,7 +872,6 @@ class ConfigCollector {
             }
           }
         } else {
-          // No result template, use value directly
           result = value;
         }
 
@@ -540,9 +884,56 @@ class ConfigCollector {
 
       // No longer display completion boxes - keep output clean
     } else {
-      // No questions for this module - show completion message
-      CLIUtils.displayModuleNoConfig(moduleName, moduleConfig.header, moduleConfig.subheader);
+      // No questions for this module - show completion message with header if available
+      const moduleDisplayName = moduleConfig.header || `${moduleName.toUpperCase()} Module`;
+
+      // Check if this module has NO configuration keys at all (like CIS)
+      // Filter out metadata fields and only count actual config objects
+      const metadataFields = new Set(['code', 'name', 'header', 'subheader', 'default_selected']);
+      const actualConfigKeys = configKeys.filter((key) => !metadataFields.has(key));
+      const hasNoConfig = actualConfigKeys.length === 0;
+
+      if (!this._silentConfig) {
+        if (hasNoConfig && (moduleConfig.subheader || moduleConfig.header)) {
+          await prompts.log.step(moduleDisplayName);
+          if (moduleConfig.subheader) {
+            await prompts.log.message(`  \u2713 ${moduleConfig.subheader}`);
+          } else {
+            await prompts.log.message(`  \u2713 No custom configuration required`);
+          }
+        } else {
+          // Module has config but just no questions to ask
+          await prompts.log.message(`  \u2713 ${moduleName.toUpperCase()} module configured`);
+        }
+      }
     }
+
+    // If we have no collected config for this module, but we have a module schema,
+    // ensure we have at least an empty object
+    if (!this.collectedConfig[moduleName]) {
+      this.collectedConfig[moduleName] = {};
+
+      // If we accepted defaults and have no answers, we still need to check
+      // if there are any static values in the schema that should be applied
+      if (moduleConfig) {
+        for (const key of Object.keys(moduleConfig)) {
+          if (key !== 'prompt' && moduleConfig[key] && typeof moduleConfig[key] === 'object') {
+            const item = moduleConfig[key];
+            // For static items (no prompt, just result), apply the result
+            if (!item.prompt && item.result) {
+              // Apply any placeholder replacements to the result
+              let result = item.result;
+              if (typeof result === 'string') {
+                result = this.replacePlaceholders(result, moduleName, moduleConfig);
+              }
+              this.collectedConfig[moduleName][key] = result;
+            }
+          }
+        }
+      }
+    }
+
+    await this.displayModulePostConfigNotes(moduleName, moduleConfig);
   }
 
   /**
@@ -571,10 +962,6 @@ class ConfigCollector {
         for (const mod of Object.keys(this.collectedConfig)) {
           if (mod !== '_meta' && this.collectedConfig[mod] && this.collectedConfig[mod][configKey]) {
             configValue = this.collectedConfig[mod][configKey];
-            // Remove {project-root}/ prefix if present for cleaner display
-            if (typeof configValue === 'string' && configValue.includes('{project-root}/')) {
-              configValue = configValue.replace('{project-root}/', '');
-            }
             break;
           }
         }
@@ -593,7 +980,7 @@ class ConfigCollector {
   }
 
   /**
-   * Build an inquirer question from a config item
+   * Build a prompt question from a config item
    * @param {string} moduleName - Module name
    * @param {string} key - Config key
    * @param {Object} item - Config item definition
@@ -611,15 +998,6 @@ class ConfigCollector {
       // This prevents duplication when the result template adds it back
       if (typeof existingValue === 'string' && existingValue.startsWith('{project-root}/')) {
         existingValue = existingValue.replace('{project-root}/', '');
-      }
-    }
-
-    // Special handling for bmad_folder: detect existing folder name
-    if (moduleName === 'core' && key === 'bmad_folder' && !existingValue && this.currentProjectDir) {
-      // Try to detect the existing BMAD folder name
-      const detectedFolder = await this.detectExistingBmadFolder(this.currentProjectDir);
-      if (detectedFolder) {
-        existingValue = detectedFolder;
       }
     }
 
@@ -737,14 +1115,15 @@ class ConfigCollector {
     }
 
     // Add current value indicator for existing configs
+    const color = await prompts.getColor();
     if (existingValue !== null && existingValue !== undefined) {
       if (typeof existingValue === 'boolean') {
-        message += chalk.dim(` (current: ${existingValue ? 'true' : 'false'})`);
+        message += color.dim(` (current: ${existingValue ? 'true' : 'false'})`);
       } else if (Array.isArray(existingValue)) {
-        message += chalk.dim(` (current: ${existingValue.join(', ')})`);
+        message += color.dim(` (current: ${existingValue.join(', ')})`);
       } else if (questionType !== 'list') {
         // Show the cleaned value (without {project-root}/) for display
-        message += chalk.dim(` (current: ${existingValue})`);
+        message += color.dim(` (current: ${existingValue})`);
       }
     } else if (item.example && questionType === 'input') {
       // Show example for input fields
@@ -754,7 +1133,7 @@ class ConfigCollector {
         exampleText = this.replacePlaceholders(exampleText, moduleName, moduleConfig);
         exampleText = exampleText.replace('{project-root}/', '');
       }
-      message += chalk.dim(` (e.g., ${exampleText})`);
+      message += color.dim(` (e.g., ${exampleText})`);
     }
 
     // Build the question object
@@ -764,7 +1143,7 @@ class ConfigCollector {
       message: message,
     };
 
-    // Set default - if it's dynamic, use a function that inquirer will evaluate with current answers
+    // Set default - if it's dynamic, use a function that the prompt will evaluate with current answers
     // But if we have an existing value, always use that instead
     if (existingValue !== null && existingValue !== undefined && questionType !== 'list') {
       question.default = existingValue;
@@ -825,6 +1204,58 @@ class ConfigCollector {
     }
 
     return question;
+  }
+
+  /**
+   * Display post-configuration notes for a module
+   * Shows prerequisite guidance based on collected config values
+   * Reads notes from the module's `post-install-notes` section in module.yaml
+   * Supports two formats:
+   *   - Simple string: always displayed
+   *   - Object keyed by config field name, with value-specific messages
+   * @param {string} moduleName - Module name
+   * @param {Object} moduleConfig - Parsed module.yaml content
+   */
+  async displayModulePostConfigNotes(moduleName, moduleConfig) {
+    if (this._silentConfig) return;
+    if (!moduleConfig || !moduleConfig['post-install-notes']) return;
+
+    const notes = moduleConfig['post-install-notes'];
+    const color = await prompts.getColor();
+
+    // Format 1: Simple string - always display
+    if (typeof notes === 'string') {
+      await prompts.log.message('');
+      for (const line of notes.trim().split('\n')) {
+        await prompts.log.message(color.dim(line));
+      }
+      return;
+    }
+
+    // Format 2: Conditional on config values
+    if (typeof notes === 'object') {
+      const config = this.collectedConfig[moduleName];
+      if (!config) return;
+
+      let hasOutput = false;
+      for (const [configKey, valueMessages] of Object.entries(notes)) {
+        const selectedValue = config[configKey];
+        if (!selectedValue || !valueMessages[selectedValue]) continue;
+
+        if (hasOutput) await prompts.log.message('');
+        hasOutput = true;
+
+        const message = valueMessages[selectedValue];
+        for (const line of message.trim().split('\n')) {
+          const trimmedLine = line.trim();
+          if (trimmedLine.endsWith(':') && !trimmedLine.startsWith(' ')) {
+            await prompts.log.info(color.bold(trimmedLine));
+          } else {
+            await prompts.log.message(color.dim('  ' + trimmedLine));
+          }
+        }
+      }
+    }
   }
 
   /**

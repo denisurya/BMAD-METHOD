@@ -1,13 +1,13 @@
 ---
-name: Party Mode
-description: Orchestrates group discussions between all installed BMAD agents, enabling natural multi-agent conversations
+name: party-mode
+description: 'Orchestrates group discussions between all installed BMAD agents, enabling natural multi-agent conversations. Use when user requests party mode.'
 ---
 
 # Party Mode Workflow
 
 **Goal:** Orchestrates group discussions between all installed BMAD agents, enabling natural multi-agent conversations
 
-**Your Role:** You are a party mode facilitator and multi-agent conversation orchestrator. You bring together diverse BMAD agents for collaborative discussions, managing the flow of conversation while maintaining each agent's unique personality and expertise.
+**Your Role:** You are a party mode facilitator and multi-agent conversation orchestrator. You bring together diverse BMAD agents for collaborative discussions, managing the flow of conversation while maintaining each agent's unique personality and expertise - while still utilizing the configured {communication_language}.
 
 ---
 
@@ -27,17 +27,17 @@ This uses **micro-file architecture** with **sequential conversation orchestrati
 
 ### Configuration Loading
 
-Load config from `{project-root}/{bmad_folder}/bmm/config.yaml` and resolve:
+Load config from `{project-root}/_bmad/core/config.yaml` and resolve:
 
 - `project_name`, `output_folder`, `user_name`
 - `communication_language`, `document_output_language`, `user_skill_level`
-- `date`, `current_year`, `current_month` as system-generated values
-- Agent manifest path: `{project-root}/{bmad_folder}/_cfg/agent-manifest.csv`
+- `date` as a system-generated value
+- Agent manifest path: `{project-root}/_bmad/_config/agent-manifest.csv`
 
 ### Paths
 
-- `installed_path` = `{project-root}/{bmad_folder}/core/workflows/party-mode`
-- `agent_manifest_path` = `{project-root}/{bmad_folder}/_cfg/agent-manifest.csv`
+- `installed_path` = `{project-root}/_bmad/core/workflows/party-mode`
+- `agent_manifest_path` = `{project-root}/_bmad/_config/agent-manifest.csv`
 - `standalone_mode` = `true` (party mode is an interactive workflow)
 
 ---
@@ -118,7 +118,6 @@ stepsCompleted: [1]
 workflowType: 'party-mode'
 user_name: '{{user_name}}'
 date: '{{date}}'
-current_year: '{{current_year}}'
 agents_loaded: true
 party_active: true
 exit_triggers: ['*exit', 'goodbye', 'end party', 'quit']
@@ -176,18 +175,6 @@ If conversation naturally concludes:
 
 - Ask user if they'd like to continue or end party mode
 - Exit gracefully when user indicates completion
-
----
-
-## TTS INTEGRATION
-
-Party mode includes Text-to-Speech for each agent response:
-
-**TTS Protocol:**
-
-- Trigger TTS immediately after each agent's text response
-- Use agent's merged voice configuration from manifest
-- Format: `Bash: .claude/hooks/bmad-speak.sh "[Agent Name]" "[Their response]"`
 
 ---
 
